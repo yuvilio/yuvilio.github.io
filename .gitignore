@@ -1,0 +1,6 @@
+.sass-cache/
+public/
+dist/
+node_modules/
+bower_components/
+.publish/
