@@ -7,7 +7,8 @@ gulp.task('deploy',  function() {
   return gulp.src('./dist/**/*')
     .pipe(ghPages(
       {
-        branch: 'gh-pages'
+        branch: 'master'  //since this is username.github.io (organization), github
+        //expects the generated files in the master branch
       //   push: true,
       //   force: true,
       //   remoteUrl: 'git@github.com:yuvilio/yuvilio.github.io.git'
