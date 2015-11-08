@@ -16,17 +16,19 @@ var nunjucks = require('nunjucks');
 
 //configure templating engine you'll use with defaults
 //and filters
-nunjucks
+var nunjucksEnv = nunjucks
   .configure(
     './_layouts',
     {
     watch: false,
     autoescape: false, //prevent metalsmith-markdown results being escaped
     noCache: true
-  })
-  .addFilter('somefilter', function(str) {
-    return str;
   });
+
+  //nunjucks plugins
+  var nunjucksDate = require('nunjucks-date');
+  nunjucksDate.setDefaultFormat('MMMM Do, YYYY');
+  nunjucksEnv.addFilter('date', nunjucksDate);
 
 //generate html from markup
 gulp.task('templates', function() {
@@ -45,7 +47,8 @@ gulp.task('templates', function() {
       // .metadata({ }) //global meta data
       // .use(drafts())
       .use(metadata({ //various data
-        site_global: 'site_global.yaml'
+        site_global: 'site_global.yaml',
+        page_home: 'page-home.yaml'
         // testJson: 'test.json'
       }))
       .use(collections({
