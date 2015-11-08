@@ -1,3 +1,13 @@
 {% extends "layout.nunj" %}
 
 {# for now empty  #}
+{% block content %}
+  <div class="main-wrap">
+
+    <h1>{{title}}</h1>
+
+    {{contents}}
+
+
+  </div>
+{% endblock %}
