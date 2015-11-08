@@ -3,23 +3,40 @@
 {# for now empty  #}
 
 {% block content %}
+  <div class="main-wrap">
 
-  <div class="posts">
+    <div class="ctas">
+      {% for cta in ctas %}
+        key: {{ cta.key }}<br>
+        name: {{cta.name}}<br>
+      {% endfor %}
+    </div>
 
-    {% for post in collections.posts %}
-      <div class="post">
-        <div class="title">
-          {{post.title}} - {{post.path}}
+    <div class="posts">
+
+      {% for post in collections.posts %}
+        <div class="post">
+          <div class="title">
+            {{post.title}} - {{post.path}}
+          </div>
+
+          <div class="excerpt">
+            {{post.excerpt}}
+          </div>
+
+          <div class="tags">
+            tags:
+            {% for tag in post.tags %}
+                <a href="/tag/{{tag}}">{{tag}}</a>
+            {% endfor %}
+          </div>
+
         </div>
+      {% endfor %}
 
-        <div class="excerpt">
-          {{post.excerpt}}
-        </div>
-      </div>
-    {% endfor %}
+    </div>
 
+    {# index.md contents #}
+    {{contents}}
   </div>
-
-  {# index.md contents #}
-  {{contents}}
 {% endblock %}

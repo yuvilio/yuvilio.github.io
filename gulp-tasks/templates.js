@@ -10,6 +10,7 @@ var markdown          = require('metalsmith-markdown');
 var permalinks        = require('metalsmith-permalinks');
 var collections       = require('metalsmith-collections');
 var drafts            = require('metalsmith-drafts');
+var tags              = require('metalsmith-tags');
 var nunjucks = require('nunjucks');
 
 //configure templating engine you'll use with defaults
@@ -50,6 +51,17 @@ gulp.task('templates', function() {
           sortBy: 'date',
           reverse: true
         }
+      }))
+      .use(tags({
+        handle: 'tags', //frontmatter key
+        path:'tag/:tag.html', //aggresgate pages
+        layout: 'tag.nunj',
+        sortBy: 'date',
+        reverse: true,
+        skipMetadata: false,
+        // Any options you want to pass to the [slug](https://github.com/dodo/node-slug) package.
+        // slug: {mode: 'rfc3986'}
+
       }))
       .use(markdown()) //translate any markdown not in raw to html
       .use(permalinks({
