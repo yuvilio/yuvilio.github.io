@@ -5,11 +5,21 @@
 {% block content %}
   <div class="main-wrap">
 
-    <div class="ctas">
-      {% for cta in ctas %}
-        key: {{ cta.key }}<br>
-        name: {{cta.name}}<br>
-      {% endfor %}
+    <div class="row">
+      <div class="small-12 column">
+
+            <div class="ctas">
+              {% for cta in ctas %}
+                key: {{ cta.key }}<br>
+                name: {{cta.name}}<br>
+              {% endfor %}
+            </div>
+
+      </div>
+    </div>
+
+    <div class="test-yaml">
+      global - {{site_global.site_name}}
     </div>
 
     <div class="posts">

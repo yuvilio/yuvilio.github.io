@@ -6,6 +6,7 @@ var gulp_front_matter = require('gulp-front-matter');
 var inPlace = require('metalsmith-in-place');
 var layouts = require('metalsmith-layouts');
 
+var metadata          = require('metalsmith-metadata');
 var markdown          = require('metalsmith-markdown');
 var permalinks        = require('metalsmith-permalinks');
 var collections       = require('metalsmith-collections');
@@ -30,7 +31,7 @@ nunjucks
 //generate html from markup
 gulp.task('templates', function() {
 
-  return gulp.src('./src/**/*.md')
+  return gulp.src(['./src/**/*.md', './src/data/**/*.yaml'])
     .pipe(gulp_front_matter({
       property: 'frontMatter',
       remove: true
@@ -41,10 +42,12 @@ gulp.task('templates', function() {
     })
     .pipe(
       gulpsmith()
-      .metadata({
-        site_name: "yuvilio.github.io"
-      }) //global meta data
-      .use(drafts())
+      // .metadata({ }) //global meta data
+      // .use(drafts())
+      .use(metadata({ //various data
+        site_global: 'site_global.yaml'
+        // testJson: 'test.json'
+      }))
       .use(collections({
         posts: {
           pattern: 'posts/*.md',
