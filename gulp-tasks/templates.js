@@ -58,6 +58,10 @@ gulp.task('templates', function() {
           reverse: true
         }
       }))
+      .use(markdown()) //translate any markdown not in raw to html
+      .use(permalinks({
+        pattern: 'posts/:title'
+      }))
       .use(tags({
         handle: 'tags', //frontmatter key
         path:'tag/:tag.html', //aggresgate pages
@@ -68,10 +72,6 @@ gulp.task('templates', function() {
         // Any options you want to pass to the [slug](https://github.com/dodo/node-slug) package.
         // slug: {mode: 'rfc3986'}
 
-      }))
-      .use(markdown()) //translate any markdown not in raw to html
-      .use(permalinks({
-        pattern: 'posts/:title'
       }))
       .use(inPlace({ //apply nunjucks for variable interpolation
         engine: 'nunjucks',
