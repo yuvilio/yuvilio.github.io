@@ -1,0 +1,25 @@
+{% extends "layout.nunj" %}
+
+{# for now empty  #}
+
+{% block content %}
+
+  <div class="posts">
+
+    {% for post in collections.posts %}
+      <div class="post">
+        <div class="title">
+          {{post.title}} - {{post.path}}
+        </div>
+
+        <div class="excerpt">
+          {{post.excerpt}}
+        </div>
+      </div>
+    {% endfor %}
+
+  </div>
+
+  {# index.md contents #}
+  {{contents}}
+{% endblock %}

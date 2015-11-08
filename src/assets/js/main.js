@@ -1,8 +1,11 @@
 (function($) {
-
   window.addEventListener('load', function(){
-    console.log('hey there, how goes there');
+
+
+    //initialize foundation
+    $(document).foundation({
+
+    });
 
   }); //on load
-
 })(jQuery);

@@ -53,7 +53,7 @@ gulp.task('templates', function() {
       }))
       .use(markdown()) //translate any markdown not in raw to html
       .use(permalinks({
-        pattern: ':title'
+        pattern: 'posts/:title'
       }))
       .use(inPlace({ //apply nunjucks for variable interpolation
         engine: 'nunjucks',

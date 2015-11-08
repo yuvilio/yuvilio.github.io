@@ -1,5 +1,5 @@
 ---
-layout: page.nunj
+layout: page-home.nunj
 title: Homepage
 permalink: false
 ---

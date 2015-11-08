@@ -26,7 +26,7 @@ gulp.task('server', function () {
 });
 
 gulp.task('watch', function(){
-  gulp.watch('./src/**/*.md', ['templates', browserSync.reload]);
+  gulp.watch(['./src/**/*.md', '_layouts/**/*.nunj'], ['templates', browserSync.reload]);
   gulp.watch('./src/assets/scss/**/*.scss', ['styles']);
   gulp.watch('./src/assets/js/**/*.js', ['scripts', browserSync.reload]);
 });
