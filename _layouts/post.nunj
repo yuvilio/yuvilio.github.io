@@ -4,9 +4,13 @@
 {% block content %}
   <div class="main-wrap">
 
-    <h1>{{title}}</h1>
+    <div class="row">
+      <div class="small-12">
+        <h1>{{title}}</h1>
 
-    {{contents}}
+        {{contents}}
+      </div>
+    </div>
 
 
   </div>
