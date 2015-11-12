@@ -1,6 +1,7 @@
 .sass-cache/
 public/
-dist/
+dist/*
+!dist/fonts/
 node_modules/
 bower_components/
 .publish/

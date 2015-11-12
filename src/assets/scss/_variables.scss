@@ -1,11 +1,18 @@
 
 
-
-
-
 //colors
 $white       : #ffffff;
 $black       : #000000;
+
+//font awesome
+@if ($env == 'development'){
+  $fa-font-path: '/fonts'; //developmen
+} @else {
+  $fa-font-path: 'https://maxcdn.bootstrapcdn.com/font-awesome/4.4.0/fonts';
+}
+
+
+
 
 //Foundation settings
 $body-bg: $white;

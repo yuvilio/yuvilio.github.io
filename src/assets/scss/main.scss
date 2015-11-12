@@ -1,6 +1,14 @@
+//environment
+$env: '/* @echo env */';
+
+
 
 @import "variables";
 @import "modules/foundation";
+
+//vendors
+@import "vendor/font-awesome";
+
 // @import "../../../node_modules/foundation-sites/scss/foundation";
 
 body {

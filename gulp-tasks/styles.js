@@ -1,7 +1,22 @@
 var gulp = require('gulp');
 var $ = require('gulp-load-plugins')(); //make plugins available in $.
+var preprocess = require('gulp-preprocess');
 var sass = require('gulp-sass');
 var autoprefixer = require('gulp-autoprefixer');
+var minimist = require('minimist');
+
+//parse command line options
+//ex: gulp --env production
+var knownOptions = {
+  string: ['env'], //ex.: --env production
+
+  //for each item, if theyh didn't pass an option, we'll default to one of these
+  default: {
+    env: 'development',
+  }
+};
+var options = minimist(process.argv.slice(2), knownOptions);
+
 
 var browserSync = require("browser-sync"); //the running browserSync instance from gulpfile.js will be picked up and used here
 
@@ -36,8 +51,9 @@ gulp.task('styles', [], function(){
       // }
     };
 
-    return gulp.src('src/assets/scss/main.scss')
+    return gulp.src('./src/assets/scss/main.scss')
     .pipe($.sourcemaps.init())
+    .pipe(preprocess({context: {env: options.env }})) //make scss aware of environment
     .pipe(sass(sassOptions).on('error', sass.logError))
     .pipe(autoprefixer('last 2 version'))
     .pipe($.sourcemaps.write('./', sourcemapsOptions)) //write to same directory as generated css

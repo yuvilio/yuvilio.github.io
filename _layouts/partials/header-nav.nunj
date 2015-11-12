@@ -1,0 +1,14 @@
+<div class="icon-bar five-up">
+  <a class="item">
+    <i class="fa fa-home"></i>
+    <label>Home</label>
+  </a>
+  <a class="item">
+    <i class="fa fa-sticky-note"></i>
+    <label>Blog</label>
+  </a>
+  <a class="item">
+    <i class="fa fa-github"></i>
+    <label>Github</label>
+  </a>
+</div>
