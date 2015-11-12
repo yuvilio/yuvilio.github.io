@@ -1,7 +1,7 @@
 var gulp       = require('gulp');
 var ghPages = require('gulp-gh-pages');
 
-// Deploy to gh pages
+// Deploy to gh pages . make sure to run gulp --env prdocution before running this
 gulp.task('deploy',  function() {
   //fetch generated results
   return gulp.src('./dist/**/*')
