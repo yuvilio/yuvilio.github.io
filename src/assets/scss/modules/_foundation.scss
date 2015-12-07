@@ -49,7 +49,11 @@
 
 @mixin foundation-everything {
   @include foundation-global-styles;
-  @include foundation-grid;
+
+  //go with flex grid rather than float grid
+  // @include foundation-grid;
+  @include foundation-flex-grid;
+
   @include foundation-typography;
   @include foundation-button;
   @include foundation-forms;
