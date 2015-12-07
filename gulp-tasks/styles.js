@@ -40,7 +40,7 @@ gulp.task('styles', [], function(){
     var sassOptions = {
       // outputStyle: 'expanded',
       //make vendor stylesheet paths relatively importable from in scss
-      includePaths: ['./bower_components/foundation/scss/']
+      includePaths: ['./bower_components/foundation-sites/scss/']
     };
 
     var sourcemapsOptions = {

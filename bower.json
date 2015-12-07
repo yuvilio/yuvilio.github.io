@@ -16,7 +16,7 @@
   "dependencies": {
     "waypoints": "~4.0.0",
     "jquery": "~2.1.4",
-    "foundation": "~5.5.3",
-    "font-awesome": "~4.4.0"
+    "font-awesome": "~4.4.0",
+    "foundation-sites": "~6.0.5"
   }
 }

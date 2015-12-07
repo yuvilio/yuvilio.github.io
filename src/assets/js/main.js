@@ -3,9 +3,7 @@
 
 
     //initialize foundation
-    $(document).foundation({
-
-    });
+    $(document).foundation();
 
   }); //on load
 })(jQuery);
