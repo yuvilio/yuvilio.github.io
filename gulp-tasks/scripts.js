@@ -12,7 +12,9 @@ gulp.task('scripts', function() {
       'bower_components/jquery/dist/jquery.js',
 
       /* zurb foundation */
-      'bower_components/foundation-sites/dist/foundation.js',
+      './bower_components/foundation-sites/dist/foundation.js',
+      // './bower_components/foundation-sites/js/foundation.core.js',
+      // './bower_components/foundation-sites/js/foundation.tabs.js',
 
       'src/assets/js/main.js'
       ]

@@ -1,9 +1,6 @@
 (function($) {
-  window.addEventListener('load', function(){
-
-
+  $(function(){
     //initialize foundation
     $(document).foundation();
-
-  }); //on load
+  })
 })(jQuery);
