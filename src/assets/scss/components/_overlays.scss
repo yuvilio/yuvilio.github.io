@@ -1,0 +1,9 @@
+
+//an overlay is a layer that fully stretches out
+//the delimiting parent should have a position:relative
+.overlay {
+    position: absolute;
+    top: 0;
+    width: 100%;
+    height: 100%;
+}

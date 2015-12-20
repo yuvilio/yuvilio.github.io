@@ -1,0 +1,8 @@
+
+
+//focus on padding as spacing mechanism between sections rather than margins
+
+//opinionated starts for sections
+.section {
+  padding: $section-spacing $section-spacing-mobile;
+}

@@ -1,0 +1,18 @@
+//opinionated starting point to background imaged elements
+.bg-image {
+    background-position: center center;
+    background-repeat: no-repeat;
+    background-size: cover;
+}
+
+
+//using img as background (use on parent tag)
+.img-bg {
+    position: relative;
+    //stretch image and blend with side borders
+    overflow: hidden;
+    img {
+        width: 105%; //beginning (override as needed)
+        max-width: initial;
+    }
+}
