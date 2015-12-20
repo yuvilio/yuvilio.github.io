@@ -19,6 +19,9 @@ gulp.task('scripts', function() {
       /* modernizr . generated from a modernizr-config.json fils (see assets/js) and placed in */
       './bower_components/modernizr/modernizr.js',
 
+      /* highlight.js. generated from the repository: node tools/build.js -n -t browser bash css diff ... */
+      './bower_components/highlight.js/highlight.pack.js',
+
       'src/assets/js/main.js'
       ]
      )
