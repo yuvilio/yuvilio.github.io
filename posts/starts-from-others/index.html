@@ -16,15 +16,48 @@
 
   <body>
 
+    <header>
+
+      <div class="icon-bar five-up">
+  <a class="item">
+    <i class="fa fa-home"></i>
+    <label>Home</label>
+  </a>
+  <a class="item">
+    <i class="fa fa-sticky-note"></i>
+    <label>Blog</label>
+  </a>
+  <a class="item">
+    <i class="fa fa-github"></i>
+    <label>Github</label>
+  </a>
+</div>
+
+
+    </header>
 
 
     
   <div class="main-wrap">
 
-    <h1>Starts from Others</h1>
+    <div class="row">
+      <div class="small-12">
+        <h1>Starts from Others</h1>
 
-    <p>So I wanted a static site.</p>
+        <p>Having finally launched this modest blog, I sit back and reflect on how it came together.  Mostly it was a series of small questions I had, searches for options and testing a few.  </p>
+<h2 id="what-will-generate-the-site-">What will generate the site?</h2>
+<p>Some software that generates static html so I don&#39;t have to fuss with extra services for now (database, script, ..). Something popular enough that it&#39;s supported and changes with requests. Something open source so I can peak at what&#39;s going on and participate when needed. It should be modular so that I can introduce parts I like to it in a pluggable way.</p>
+<p>Of course, none of these refinements to the question come at once. Rather, I look for options, give them a go, progress somewhere with them and ...the important bit... get stuck. I then reflect on <em>why</em> I&#39;m stuck and refine my expectations to the question.</p>
+<p>Having gone through this iteration a few times, I ended up going with Metalsmith, partly due to my preferences. In addition to being open source, active, it&#39;s stewards is a company that makes software that cares about optimizing and keeping things simple.  It&#39;s also very modular and plugin friendly.  That&#39;s nice when it comes to things like selecting a templating engine.  I can go with my current preference, nunjucks.</p>
+<p>It&#39;s also friendly to local automation scripts like gulp.  Thanks to a gulp plugin called gulpsmith, I can have all my favorite automation creature comforts I&#39;m familiar with available in a metalsmith pipeline.</p>
+<p>There were plenty of other choices that were very close or that I just didn&#39;t research as well to go with them.  In the wonderful world of <a href="http://www.staticgen.com/">static site generators</a>, advantages will be missed.</p>
+<p>Having said that, the best part of generating this site came in learning how <em>others</em> have stitched parts that I like together. For example, I really want nunjucks. How can I use it? One approache is to just <a href="https://github.com/search">search github</a> for &quot;nunjucks&quot; &amp;  &quot;metalsmith&quot; and stumble upon projects already using both of these packages.  Or how about a date formatting filter for nunjucks? Googling yielded packages like <a href="https://github.com/techmsi/nunjucks-date">here&#39;s</a>. How can i customize my gulp setup using gulpsmith.  Again, searching both via google and github I stumbled upon <a href="https://github.com/everydayhero/oxjam-2015">this</a> great example from the folks at Everyday Hero.</p>
+<p>The same goes for using the software. For example, in templating how do i access the content of my markdown file? It&#39;s probably somewhere in the docs. But if it&#39;s not immediatly obvious. There&#39;s a good chance others might have missed it. Searching the issues of an active project usually yields the result.  For example it&#39;s <a href="https://github.com/segmentio/metalsmith/issues/107#issuecomment-69931656">contents</a>.  </p>
+<p>Use the source. Nunjucks has amazing filters. Get the <a href="https://mozilla.github.io/nunjucks/templating.html#filters">general gist</a> of how they work. Then <a href="https://github.com/mozilla/nunjucks/blob/master/src/filters.js"><em>look at the source code</em></a> and be amazed at what they can do. You don&#39;t have to get what the function does.  Just try it out.  I recommend giving <code>dump</code> a go on any variable.</p>
+<p>So that&#39;s just some of what went into bringing this humble post to life the way <em>I</em> wanted to do so.  Let&#39;s see what it can help me get across.</p>
 
+      </div>
+    </div>
 
 
   </div>
