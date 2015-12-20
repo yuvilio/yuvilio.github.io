@@ -16,6 +16,9 @@ gulp.task('scripts', function() {
       // './bower_components/foundation-sites/js/foundation.core.js',
       // './bower_components/foundation-sites/js/foundation.tabs.js',
 
+      /* modernizr . generated from a modernizr-config.json fils (see assets/js) and placed in */
+      './bower_components/modernizr/modernizr.js',
+
       'src/assets/js/main.js'
       ]
      )
