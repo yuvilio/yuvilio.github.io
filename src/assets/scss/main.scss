@@ -2,7 +2,7 @@
 $env: '/* @echo env */';
 
 
-
+@import "color-palette";
 @import "variables";
 
 @import "modules/foundation"; //custom foundation
@@ -16,9 +16,8 @@ $env: '/* @echo env */';
 @import "components/global";
 @import "components/type";
 @import "components/spacing";
-@import "components/images";
-@import "components/images";
-@import "components/svg";
+
+@import "components/post-tease";
 
 
 
