@@ -61,3 +61,17 @@ gulp.task('styles', [], function(){
     .pipe(browserSync.stream()); //inject the changed stylesheet rather than reloading the page
 
 });
+
+
+//Generate svg sprite sheets. We can use ajax to inject the resulting svg file
+gulp.task('sprites', function(){
+  var config                  = {
+    mode                    : {
+        stack               : true      // Create a «stack» sprite
+    }
+  };
+
+  gulp.src('./src/assets/img/*.svg')
+    .pipe($.svgSprite( config ))
+    .pipe(gulp.dest('./dist/assets/img'));
+});
