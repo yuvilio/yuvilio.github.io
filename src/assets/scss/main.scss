@@ -15,11 +15,12 @@ $env: '/* @echo env */';
 //components
 @import "components/global";
 @import "components/type";
+@import "components/svg";
 @import "components/spacing";
 
 @import "components/post-tease";
 
-
+@import "layouts/header";
 
 // @import "../../../node_modules/foundation-sites/scss/foundation";
 

@@ -4,6 +4,16 @@
 $white       : #ffffff;
 $black       : #000000;
 
+//shorthand from palette
+$tuscany: $color-secondary-2-3;
+$tuscany-light: $color-secondary-2-1;
+$wheat: $color-secondary-1-2;
+$wheat-light: $color-secondary-1-1;
+
+//grays / desaturates
+$wheat-gray: desaturate( $wheat-light, 75% );
+
+
 //font awesome
 @if ($env == 'development'){
   $fa-font-path: '/fonts'; //developmen
@@ -12,6 +22,12 @@ $black       : #000000;
 }
 
 
+//misc
+$transition: .2s ease;
+
+// layout
+$section-spacing: 30px;
+$section-spacing-mobile: 15px;
 
 
 //Foundation settings
@@ -20,6 +36,9 @@ $body-bg: $white;
 // $secondary-color: #e7e7e7;
 
 $font-smoothing: antialiased;
+
+//grid
+$grid-column-gutter: 30px;
 
 // d. Media Query Ranges
 // - - - - - - - - - - - - - - - - - - - - - - - - -
