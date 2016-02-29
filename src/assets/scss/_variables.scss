@@ -8,7 +8,12 @@ $black       : #000000;
 $tuscany: $color-secondary-2-3;
 $tuscany-light: $color-secondary-2-1;
 $wheat: $color-secondary-1-2;
+$dark-wheat: $color-secondary-1-4;
 $wheat-light: $color-secondary-1-1;
+$medium-blue: $color-primary-3;
+$dark-blue: $color-primary-4;
+$crimson-red: $color-secondary-2-4;
+
 
 //grays / desaturates
 $wheat-gray: desaturate( $wheat-light, 75% );
@@ -32,8 +37,16 @@ $section-spacing-mobile: 15px;
 
 //Foundation settings
 $body-bg: $white;
-// $primary-color: #008CBA;
+$primary-color: $crimson-red; //links, ....
 // $secondary-color: #e7e7e7;
+$body-font-color: darken($dark-wheat, 20%);
+
+//Top Bar
+$topbar-padding: 0;
+$topbar-background: inherit; //blend in with the background
+$topbar-link-color: $primary-color;
+
+// $topbar-input-width: 200px !default;
 
 $font-smoothing: antialiased;
 

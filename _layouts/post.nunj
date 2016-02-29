@@ -1,12 +1,18 @@
+{# post collection #}
 {% extends "layout.nunj" %}
 
-{# for now empty  #}
 {% block content %}
   <div class="main-wrap">
 
     <div class="row">
       <div class="small-12">
         <h1>{{title}}</h1>
+        
+        <div class="meta">
+          {% for tag in tags %}
+              <a href="/tag/{{post.tagsUrlSafe[loop.index - 1]}}">{{tag}}</a>
+          {% endfor %}
+        </div>
 
         {{contents}}
       </div>

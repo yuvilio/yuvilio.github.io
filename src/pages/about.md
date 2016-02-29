@@ -1,9 +1,9 @@
 ---
 title: About
 collection: pages
-layout: post.nunj
-tags: sample-tag
+layout: page.nunj
+tags: about-me
 excerpt: About me
 ---
 
-About page
+Hey there, I'm Yuval. I work with code and think in tangents.
