@@ -1,7 +1,7 @@
 //gulpfile inspiration from dfmonaco, everydayhero, grancalavera
 
 var gulp = require("gulp");
-var browserSync = require("browser-sync");
+var browserSync = require("browser-sync").create();
 
 
 //tasks
