@@ -56,11 +56,31 @@ gulp.task('templates', function() {
           pattern: 'posts/*.md',
           sortBy: 'date',
           reverse: true
+        },
+        pages: {
+          pattern: 'pages/*.md',
+          sortBy: 'date',
+          reverse: true
         }
       }))
       .use(markdown()) //translate any markdown not in raw to html
       .use(permalinks({
-        pattern: 'posts/:title'
+
+          // original options would act as the keys of a `default` linkset,
+         pattern: ':title',
+         date: 'YYYY',
+
+         // each linkset defines a match, and any other desired option
+         linksets: [{
+             match: { collection: 'posts' },
+            //  pattern: 'posts/:title'
+             pattern: 'blog/:date/:title',
+             date: 'mmddyy'
+         },{
+             match: { collection: 'pages' },
+             pattern: ':title'
+         }]
+
       }))
       .use(tags({
         handle: 'tags', //frontmatter key
