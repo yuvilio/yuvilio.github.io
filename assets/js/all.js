@@ -9212,7 +9212,7 @@ return jQuery;
 !function($) {
 "use strict";
 
-var FOUNDATION_VERSION = '6.0.6';
+var FOUNDATION_VERSION = '6.1.1';
 
 // Global Foundation object
 // This is attached to the window, or used as a module for AMD/Browserify
@@ -9262,21 +9262,19 @@ var Foundation = {
    * @param {Object} plugin - an instance of a plugin, usually `this` in context.
    * @fires Plugin#init
    */
-  registerPlugin: function(plugin){
-    var pluginName = functionName(plugin.constructor).toLowerCase();
-
+  registerPlugin: function(plugin, name){
+    var pluginName = name ? hyphenate(name) : functionName(plugin.constructor).toLowerCase();
     plugin.uuid = this.GetYoDigits(6, pluginName);
 
-    if(!plugin.$element.attr('data-' + pluginName)){
-      plugin.$element.attr('data-' + pluginName, plugin.uuid);
-    }
+    if(!plugin.$element.attr('data-' + pluginName)){ plugin.$element.attr('data-' + pluginName, plugin.uuid); }
+    if(!plugin.$element.data('zfPlugin')){ plugin.$element.data('zfPlugin', plugin); }
           /**
            * Fires when the plugin has initialized.
            * @event Plugin#init
            */
     plugin.$element.trigger('init.zf.' + pluginName);
 
-    this._activePlugins[plugin.uuid] = plugin;
+    this._uuids.push(plugin.uuid);
 
     return;
   },
@@ -9288,16 +9286,18 @@ var Foundation = {
    * @fires Plugin#destroyed
    */
   unregisterPlugin: function(plugin){
-    var pluginName = functionName(plugin.constructor).toLowerCase();
+    var pluginName = hyphenate(functionName(plugin.$element.data('zfPlugin').constructor));
 
-    delete this._activePlugins[plugin.uuid];
-    plugin.$element.removeAttr('data-' + pluginName)
+    this._uuids.splice(this._uuids.indexOf(plugin.uuid), 1);
+    plugin.$element.removeAttr('data-' + pluginName).removeData('zfPlugin')
           /**
            * Fires when the plugin has been destroyed.
            * @event Plugin#destroyed
            */
           .trigger('destroyed.zf.' + pluginName);
-
+    for(var prop in plugin){
+      plugin[prop] = null;//clean up script to prep for garbage collection.
+    }
     return;
   },
 
@@ -9307,34 +9307,37 @@ var Foundation = {
    * @param {String} plugins - optional string of an individual plugin key, attained by calling `$(element).data('pluginName')`, or string of a plugin class i.e. `'dropdown'`
    * @default If no argument is passed, reflow all currently active plugins.
    */
-  _reflow: function(plugins){
-    var actvPlugins = Object.keys(this._activePlugins);
-    var _this = this;
-
-    if(!plugins){
-      actvPlugins.forEach(function(p){
-        _this._activePlugins[p]._init();
-      });
-
-    }else if(typeof plugins === 'string'){
-      var namespace = plugins.split('-')[1];
-
-      if(namespace){
-
-        this._activePlugins[plugins]._init();
-
-      }else{
-        namespace = new RegExp(plugins, 'i');
-
-        actvPlugins.filter(function(p){
-          return namespace.test(p);
-        }).forEach(function(p){
-          _this._activePlugins[p]._init();
-        });
-      }
-    }
-
-  },
+   reInit: function(plugins){
+     var isJQ = plugins instanceof $;
+     try{
+       if(isJQ){
+         plugins.each(function(){
+           $(this).data('zfPlugin')._init();
+         });
+       }else{
+         var type = typeof plugins,
+         _this = this,
+         fns = {
+           'object': function(plgs){
+             plgs.forEach(function(p){
+               $('[data-'+ p +']').foundation('_init');
+             });
+           },
+           'string': function(){
+             $('[data-'+ plugins +']').foundation('_init');
+           },
+           'undefined': function(){
+             this['object'](Object.keys(_this._plugins));
+           }
+         };
+         fns[type](plugins);
+       }
+     }catch(err){
+       console.error(err);
+     }finally{
+       return plugins;
+     }
+   },
 
   /**
    * returns a random base-36 uid with namespacing
@@ -9379,7 +9382,7 @@ var Foundation = {
         var $el = $(this),
             opts = {};
         // Don't double-dip on plugins
-        if ($el.data('zf-plugin')) {
+        if ($el.data('zfPlugin')) {
           console.warn("Tried to initialize "+name+" on an element that already has a Foundation plugin.");
           return;
         }
@@ -9391,7 +9394,7 @@ var Foundation = {
           });
         }
         try{
-          $el.data('zf-plugin', new plugin($(this), opts));
+          $el.data('zfPlugin', new plugin($(this), opts));
         }catch(er){
           console.error(er);
         }finally{
@@ -9574,7 +9577,7 @@ function functionName(fn) {
 function parseValue(str){
   if(/true/.test(str)) return true;
   else if(/false/.test(str)) return false;
-  else if(!isNaN(str * 1)/* && typeof (str * 1) === "number"*/) return parseFloat(str);
+  else if(!isNaN(str * 1)) return parseFloat(str);
   return str;
 }
 // Convert PascalCase to kebab-case
@@ -9777,7 +9780,10 @@ function hyphenate(str) {
     40: 'ARROW_DOWN'
   };
 
-  // constants for easier comparing Can be used like Foundation.parseKey(event) === Foundation.keys.SPACE
+  /*
+   * Constants for easier comparing.
+   * Can be used like Foundation.parseKey(event) === Foundation.keys.SPACE
+   */
   var keys = (function(kcs) {
     var k = {};
     for (var kc in kcs) k[kcs[kc]] = kcs[kc];
@@ -9808,11 +9814,11 @@ function hyphenate(str) {
   /**
    * Handles the given (keyboard) event
    * @param {Event} event - the event generated by the event handler
-   * @param {Object} component - Foundation component, e.g. Slider or Reveal
+   * @param {String} component - Foundation component's name, e.g. Slider or Reveal
    * @param {Objects} functions - collection of functions that are to be executed
    */
   var handleKey = function(event, component, functions) {
-    var commandList = commands[Foundation.getFnName(component)],
+    var commandList = commands[component],
       keyCode = parseKey(event),
       cmds,
       command,
@@ -9830,14 +9836,14 @@ function hyphenate(str) {
 
 
     fn = functions[command];
-    if (fn && typeof fn === 'function') { // execute function with context of the component if exists
-        fn.apply(component);
+    if (fn && typeof fn === 'function') { // execute function  if exists
+        fn.apply();
         if (functions.handled || typeof functions.handled === 'function') { // execute function when event was handled
-            functions.handled.apply(component);
+            functions.handled.apply();
         }
     } else {
         if (functions.unhandled || typeof functions.unhandled === 'function') { // execute function when event was not handled
-            functions.unhandled.apply(component);
+            functions.unhandled.apply();
         }
     }
   };
@@ -10322,7 +10328,7 @@ Foundation.Motion = Motion;
   $.spotSwipe = {
     version: '1.0.0',
     enabled: 'ontouchstart' in document.documentElement,
-    preventDefault: true,
+    preventDefault: false,
     moveThreshold: 75,
     timeThreshold: 200
   };
@@ -10352,10 +10358,11 @@ Foundation.Motion = Motion;
       if(Math.abs(dx) >= $.spotSwipe.moveThreshold && elapsedTime <= $.spotSwipe.timeThreshold) {
         dir = dx > 0 ? 'left' : 'right';
       }
-      else if(Math.abs(dy) >= $.spotSwipe.moveThreshold && elapsedTime <= $.spotSwipe.timeThreshold) {
-        dir = dy > 0 ? 'down' : 'up';
-      }
+      // else if(Math.abs(dy) >= $.spotSwipe.moveThreshold && elapsedTime <= $.spotSwipe.timeThreshold) {
+      //   dir = dy > 0 ? 'down' : 'up';
+      // }
       if(dir) {
+        e.preventDefault();
         onTouchEnd.call(this);
         $(this).trigger('swipe', dir).trigger('swipe' + dir);
       }
@@ -10888,25 +10895,54 @@ Foundation.Motion = Motion;
   function Abide(element, options) {
     this.$element = element;
     this.options  = $.extend({}, Abide.defaults, this.$element.data(), options);
-    this.$window  = $(window);
-    this.name     = 'Abide';
-    this.attr     = 'data-abide';
 
     this._init();
-    this._events();
 
-    Foundation.registerPlugin(this);
+    Foundation.registerPlugin(this, 'Abide');
   }
 
   /**
    * Default settings for plugin
    */
   Abide.defaults = {
-    validateOn: 'fieldChange', // options: fieldChange, manual, submit
+    /**
+     * The default event to validate inputs. Checkboxes and radios validate immediately.
+     * Remove or change this value for manual validation.
+     * @option
+     * @example 'fieldChange'
+     */
+    validateOn: 'fieldChange',
+    /**
+     * Class to be applied to input labels on failed validation.
+     * @option
+     * @example 'is-invalid-label'
+     */
     labelErrorClass: 'is-invalid-label',
+    /**
+     * Class to be applied to inputs on failed validation.
+     * @option
+     * @example 'is-invalid-input'
+     */
     inputErrorClass: 'is-invalid-input',
+    /**
+     * Class selector to use to target Form Errors for show/hide.
+     * @option
+     * @example '.form-error'
+     */
     formErrorSelector: '.form-error',
+    /**
+     * Class added to Form Errors on failed validation.
+     * @option
+     * @example 'is-visible'
+     */
     formErrorClass: 'is-visible',
+    /**
+     * Set to true to validate text inputs on any value change.
+     * @option
+     * @example false
+     */
+    liveValidate: false,
+
     patterns: {
       alpha : /^[a-zA-Z]+$/,
       alpha_numeric : /^[a-zA-Z0-9]+$/,
@@ -10938,13 +10974,17 @@ Foundation.Motion = Motion;
       // #FFF or #FFFFFF
       color : /^#?([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/
     },
+    /**
+     * Optional validation functions to be used. `equalTo` being the only default included function.
+     * Functions should return only a boolean if the input is valid or not. Functions are given the following arguments:
+     * el : The jQuery element to validate.
+     * required : Boolean value of the required attribute be present or not.
+     * parent : The direct parent of the input.
+     * @option
+     */
     validators: {
       equalTo: function (el, required, parent) {
-        var from  = document.getElementById(el.getAttribute(this.add_namespace('data-equalto'))).value,
-            to    = el.value,
-            valid = (from === to);
-
-        return valid;
+        return $('#' + el.attr('data-equalto')).val() === el.val();
       }
     }
   };
@@ -10954,7 +10994,10 @@ Foundation.Motion = Motion;
    * Initializes the Abide plugin and calls functions to get Abide functioning on load.
    * @private
    */
-  Abide.prototype._init = function() {
+  Abide.prototype._init = function(){
+    this.$inputs = this.$element.find('input, textarea, select').not('[data-abide-ignore]');
+
+    this._events();
   };
 
   /**
@@ -10962,41 +11005,36 @@ Foundation.Motion = Motion;
    * @private
    */
   Abide.prototype._events = function() {
-    var self = this;
-    this.$element
-      .off('.abide')
-      .on('reset.fndtn.abide', function(e) {
-        self.resetForm($(this));
-      })
-      .on('submit.fndtn.abide', function(e) {
-        e.preventDefault();
-        self.validateForm(self.$element);
-      })
-      .find('input, textarea, select')
-        .off('.abide')
-        .on('blur.fndtn.abide change.fndtn.abide', function (e) {
-          if (self.options.validateOn === 'fieldChange') {
-            self.validateInput($(e.target), self.$element);
-          }
-          // self.validateForm(self.$element);
+    var _this = this;
+
+    this.$element.off('.abide')
+        .on('reset.zf.abide', function(e){
+          _this.resetForm();
         })
-        .on('keydown.fndtn.abide', function (e) {
-          // if (settings.live_validate === true && e.which != 9) {
-          //   clearTimeout(self.timer);
-          //   self.timer = setTimeout(function () {
-          //     self.validate([this], e);
-          //   }.bind(this), settings.timeout);
-          // }
-          // self.validateForm(self.$element);
+        .on('submit.zf.abide', function(e){
+          return _this.validateForm();
         });
 
+    if(this.options.validateOn === 'fieldChange'){
+        this.$inputs.off('change.zf.abide')
+            .on('change.zf.abide', function(e){
+              _this.validateInput($(this));
+            });
+    }
+
+    if(this.options.liveValidate){
+      this.$inputs.off('input.zf.abide')
+          .on('input.zf.abide', function(e){
+            _this.validateInput($(this));
+          });
+    }
   },
   /**
    * Calls necessary functions to update Abide upon DOM change
    * @private
    */
   Abide.prototype._reflow = function() {
-    var self = this;
+    this._init();
   };
   /**
    * Checks whether or not a form element has the required attribute and if it's checked or not
@@ -11004,265 +11042,251 @@ Foundation.Motion = Motion;
    * @returns {Boolean} Boolean value depends on whether or not attribute is checked or empty
    */
   Abide.prototype.requiredCheck = function($el) {
+    if(!$el.attr('required')) return true;
+    var isGood = true;
     switch ($el[0].type) {
-      case 'text':
-        if ($el.attr('required') && !$el.val()) {
-          // requirement check does not pass
-          return false;
-        } else {
-          return true;
-        }
-        break;
-        case 'password':
-        if ($el.attr('required') && !$el.val()) {
-          // requirement check does not pass
-          return false;
-        } else {
-          return true;
-        }
-        break;
+
       case 'checkbox':
-        if ($el.attr('required') && !$el.is(':checked')) {
-          return false;
-        } else {
-          return true;
-        }
-        break;
       case 'radio':
-        if ($el.attr('required') && !$el.is(':checked')) {
-          return false;
-        } else {
-          return true;
-        }
+        isGood = $el[0].checked;
         break;
+
+      case 'select':
+      case 'select-one':
+      case 'select-multiple':
+        var opt = $el.find('option:selected');
+        if(!opt.length || !opt.val()) isGood = false;
+        break;
+
       default:
-        if ($el.attr('required') && (!$el.val() || !$el.val().length || $el.is(':empty'))) {
-          return false;
-        } else {
-          return true;
-        }
+        if(!$el.val() || !$el.val().length) isGood = false;
     }
+    return isGood;
   };
   /**
-   * Checks whether or not a form element has the required attribute and if it's checked or not
-   * @param {Object} element - jQuery object to check for required attribute
+   * Based on $el, get the first element with selector in this order:
+   * 1. The element's direct sibling('s).
+   * 3. The element's parent's children.
+   *
+   * This allows for multiple form errors per input, though if none are found, no form errors will be shown.
+   *
+   * @param {Object} $el - jQuery object to use as reference to find the form error selector.
+   * @returns {Object} jQuery object with the selector.
+   */
+  Abide.prototype.findFormError = function($el){
+    var $error = $el.siblings(this.options.formErrorSelector)
+    if(!$error.length){
+      $error = $el.parent().find(this.options.formErrorSelector);
+    }
+    return $error;
+  };
+  /**
+   * Get the first element in this order:
+   * 2. The <label> with the attribute `[for="someInputId"]`
+   * 3. The `.closest()` <label>
+   *
+   * @param {Object} $el - jQuery object to check for required attribute
    * @returns {Boolean} Boolean value depends on whether or not attribute is checked or empty
    */
   Abide.prototype.findLabel = function($el) {
-    if ($el.next('label').length) {
-      return $el.next('label');
-    }
-    else {
+    var $label = this.$element.find('label[for="' + $el[0].id + '"]');
+    if(!$label.length){
       return $el.closest('label');
     }
+    return $label;
   };
   /**
    * Adds the CSS error class as specified by the Abide settings to the label, input, and the form
-   * @param {Object} element - jQuery object to add the class to
+   * @param {Object} $el - jQuery object to add the class to
    */
-  Abide.prototype.addErrorClasses = function($el) {
-    var self = this,
-        $label = self.findLabel($el),
-        $formError = $el.next(self.options.formErrorSelector) || $el.find(self.options.formErrorSelector);
+  Abide.prototype.addErrorClasses = function($el){
+    var $label = this.findLabel($el),
+        $formError = this.findFormError($el);
 
-    // label
-    if ($label) {
-      $label.addClass(self.options.labelErrorClass);
+    if($label.length){
+      $label.addClass(this.options.labelErrorClass);
     }
-    // form error
-    if ($formError) {
-      $formError.addClass(self.options.formErrorClass);
+    if($formError.length){
+      $formError.addClass(this.options.formErrorClass);
     }
-    // input
-    $el.addClass(self.options.inputErrorClass);
+    $el.addClass(this.options.inputErrorClass).attr('data-invalid', '');
   };
   /**
    * Removes CSS error class as specified by the Abide settings from the label, input, and the form
-   * @param {Object} element - jQuery object to remove the class from
+   * @param {Object} $el - jQuery object to remove the class from
    */
-  Abide.prototype.removeErrorClasses = function($el) {
-    var self = this,
-        $label = self.findLabel($el),
-        $formError = $el.next(self.options.formErrorSelector) || $el.find(self.options.formErrorSelector);
-    // label
-    if ($label && $label.hasClass(self.options.labelErrorClass)) {
-      $label.removeClass(self.options.labelErrorClass);
+  Abide.prototype.removeErrorClasses = function($el){
+    var $label = this.findLabel($el),
+        $formError = this.findFormError($el);
+
+    if($label.length){
+      $label.removeClass(this.options.labelErrorClass);
     }
-    // form error
-    if ($formError && $formError.hasClass(self.options.formErrorClass)) {
-      $formError.removeClass(self.options.formErrorClass);
+    if($formError.length){
+      $formError.removeClass(this.options.formErrorClass);
     }
-    // input
-    if ($el.hasClass(self.options.inputErrorClass)) {
-      $el.removeClass(self.options.inputErrorClass);
-    }
+    $el.removeClass(this.options.inputErrorClass).removeAttr('data-invalid');
   };
   /**
    * Goes through a form to find inputs and proceeds to validate them in ways specific to their type
    * @fires Abide#invalid
    * @fires Abide#valid
    * @param {Object} element - jQuery object to validate, should be an HTML input
-   * @param {Object} form - jQuery object of the entire form to find the various input elements
+   * @returns {Boolean} goodToGo - If the input is valid or not.
    */
-  Abide.prototype.validateInput = function($el, $form) {
-    var self = this,
-        textInput = $form.find('input[type="text"]'),
-        passwordInput = $form.find('input[type="password"]'),
-        checkInput = $form.find('input[type="checkbox"]'),
-        label,
-        radioGroupName;
+  Abide.prototype.validateInput = function($el){
+    var clearRequire = this.requiredCheck($el),
+        validated = false,
+        customValidator = true,
+        validator = $el.attr('data-validator'),
+        equalTo = true;
 
-    if ($el[0].type === 'text') {
-      if (!self.requiredCheck($el) || !self.validateText($el)) {
-        self.addErrorClasses($el);
-        $el.trigger('invalid.fndtn.abide', $el[0]);
-      }
-      else {
-        self.removeErrorClasses($el);
-        $el.trigger('valid.fndtn.abide', $el[0]);
-      }
-    }
-    else if ($el[0].type === 'radio') {
-      radioGroupName = $el.attr('name');
-      label = $el.siblings('label');
+    switch ($el[0].type) {
 
-      if (self.validateRadio(radioGroupName)) {
-        $(label).each(function() {
-          if ($(this).hasClass(self.options.labelErrorClass)) {
-            $(this).removeClass(self.options.labelErrorClass);
-          }
-        });
-        $el.trigger('valid.fndtn.abide', $el[0]);
-      }
-      else {
-        $(label).each(function() {
-          $(this).addClass(self.options.labelErrorClass);
-        });
-        $el.trigger('invalid.fndtn.abide', $el[0]);
-      };
+      case 'radio':
+        validated = this.validateRadio($el.attr('name'));
+        break;
+
+      case 'checkbox':
+        validated = clearRequire;
+        break;
+
+      case 'select':
+      case 'select-one':
+      case 'select-multiple':
+        validated = clearRequire;
+        break;
+
+      default:
+        validated = this.validateText($el);
     }
-    else if ($el[0].type === 'checkbox') {
-      if (!self.requiredCheck($el)) {
-        self.addErrorClasses($el);
-        $el.trigger('invalid.fndtn.abide', $el[0]);
-      }
-      else {
-        self.removeErrorClasses($el);
-        $el.trigger('valid.fndtn.abide', $el[0]);
-      }
-    }
-    else {
-      if (!self.requiredCheck($el) || !self.validateText($el)) {
-        self.addErrorClasses($el);
-        $el.trigger('invalid.fndtn.abide', $el[0]);
-      }
-      else {
-        self.removeErrorClasses($el);
-        $el.trigger('valid.fndtn.abide', $el[0]);
-      }
-    }
+
+    if(validator){ customValidator = this.matchValidation($el, validator, $el.attr('required')); }
+    if($el.attr('data-equalto')){ equalTo = this.options.validators.equalTo($el); }
+
+    var goodToGo = [clearRequire, validated, customValidator, equalTo].indexOf(false) === -1,
+        message = (goodToGo ? 'valid' : 'invalid') + '.zf.abide';
+
+    this[goodToGo ? 'removeErrorClasses' : 'addErrorClasses']($el);
+
+    /**
+     * Fires when the input is done checking for validation. Event trigger is either `valid.zf.abide` or `invalid.zf.abide`
+     * Trigger includes the DOM element of the input.
+     * @event Abide#valid
+     * @event Abide#invalid
+     */
+    $el.trigger(message, $el[0]);
+
+    return goodToGo;
   };
   /**
    * Goes through a form and if there are any invalid inputs, it will display the form error element
-   * @param {Object} element - jQuery object to validate, should be a form HTML element
+   * @returns {Boolean} noError - true if no errors were detected...
+   * @fires Abide#formvalid
+   * @fires Abide#forminvalid
    */
-  Abide.prototype.validateForm = function($form) {
-    var self = this,
-        inputs = $form.find('input'),
-        inputCount = $form.find('input').length,
-        counter = 0;
+  Abide.prototype.validateForm = function(){
+    var acc = [],
+        _this = this;
 
-    while (counter < inputCount) {
-      self.validateInput($(inputs[counter]), $form);
-      counter++;
-    }
-
-    // what are all the things that can go wrong with a form?
-    if ($form.find('.form-error.is-visible').length || $form.find('.is-invalid-label').length) {
-      $form.find('[data-abide-error]').css('display', 'block');
-    }
-    else {
-      $form.find('[data-abide-error]').css('display', 'none');
-    }
-  };
-  /**
-   * Determines whether or a not a text input is valid based on the patterns specified in the attribute
-   * @param {Object} element - jQuery object to validate, should be a text input HTML element
-   * @returns {Boolean} Boolean value depends on whether or not the input value matches the pattern specified
-   */
-  Abide.prototype.validateText = function($el) {
-    var self = this,
-        valid = false,
-        patternLib = this.options.patterns,
-        inputText = $($el).val(),
-        // maybe have a different way of parsing this bc people might use type
-        pattern = $($el).attr('pattern');
-
-    // if there's no value, then return true
-    // since required check has already been done
-    if (inputText.length === 0) {
-      return true;
-    }
-    else {
-      if (inputText.match(patternLib[pattern])) {
-        return true;
-      }
-      else {
-        return false;
-      }
-    }
-  };
-  /**
-   * Determines whether or a not a radio input is valid based on whether or not it is required and selected
-   * @param {String} group - A string that specifies the name of a radio button group
-   * @returns {Boolean} Boolean value depends on whether or not at least one radio input has been selected (if it's required)
-   */
-  Abide.prototype.validateRadio = function(group) {
-    var self = this,
-        labels = $(':radio[name="' + group + '"]').siblings('label'),
-        counter = 0;
-    // go through each radio button
-    $(':radio[name="' + group + '"]').each(function() {
-      // put them through the required checkpoint
-      if (!self.requiredCheck($(this))) {
-        // if at least one doesn't pass, add a tally to the counter
-        counter++;
-      }
-      // if at least one is checked
-      // reset the counter
-      if ($(this).is(':checked')) {
-        counter = 0;
-      }
+    this.$inputs.each(function(){
+      acc.push(_this.validateInput($(this)));
     });
 
-    if (counter > 0) {
-      return false;
-    }
-    else {
-      return true;
-    }
-  };
-  Abide.prototype.matchValidation = function(val, validation) {
+    var noError = acc.indexOf(false) === -1;
 
+    this.$element.find('[data-abide-error]').css('display', (noError ? 'none' : 'block'));
+        /**
+         * Fires when the form is finished validating. Event trigger is either `formvalid.zf.abide` or `forminvalid.zf.abide`.
+         * Trigger includes the element of the form.
+         * @event Abide#formvalid
+         * @event Abide#forminvalid
+         */
+    this.$element.trigger((noError ? 'formvalid' : 'forminvalid') + '.zf.abide', [this.$element]);
+
+    return noError;
+  };
+  /**
+   * Determines whether or a not a text input is valid based on the pattern specified in the attribute. If no matching pattern is found, returns true.
+   * @param {Object} $el - jQuery object to validate, should be a text input HTML element
+   * @param {String} pattern - string value of one of the RegEx patterns in Abide.options.patterns
+   * @returns {Boolean} Boolean value depends on whether or not the input value matches the pattern specified
+   */
+   Abide.prototype.validateText = function($el, pattern){
+     // pattern = pattern ? pattern : $el.attr('pattern') ? $el.attr('pattern') : $el.attr('type');
+     pattern = (pattern || $el.attr('pattern') || $el.attr('type'));
+     var inputText = $el.val();
+
+     return inputText.length ?//if text, check if the pattern exists, if so, test it, if no text or no pattern, return true.
+            this.options.patterns.hasOwnProperty(pattern) ? this.options.patterns[pattern].test(inputText) :
+            pattern && pattern !== $el.attr('type') ? new RegExp(pattern).test(inputText) : true : true;
+   };  /**
+   * Determines whether or a not a radio input is valid based on whether or not it is required and selected
+   * @param {String} groupName - A string that specifies the name of a radio button group
+   * @returns {Boolean} Boolean value depends on whether or not at least one radio input has been selected (if it's required)
+   */
+  Abide.prototype.validateRadio = function(groupName){
+    var $group = this.$element.find(':radio[name="' + groupName + '"]'),
+        counter = [],
+        _this = this;
+
+    $group.each(function(){
+      var rdio = $(this),
+          clear = _this.requiredCheck(rdio);
+      counter.push(clear);
+      if(clear) _this.removeErrorClasses(rdio);
+    });
+
+    return counter.indexOf(false) === -1;
+  };
+  /**
+   * Determines if a selected input passes a custom validation function. Multiple validations can be used, if passed to the element with `data-validator="foo bar baz"` in a space separated listed.
+   * @param {Object} $el - jQuery input element.
+   * @param {String} validators - a string of function names matching functions in the Abide.options.validators object.
+   * @param {Boolean} required - self explanatory?
+   * @returns {Boolean} - true if validations passed.
+   */
+  Abide.prototype.matchValidation = function($el, validators, required){
+    var _this = this;
+    required = required ? true : false;
+    var clear = validators.split(' ').map(function(v){
+      return _this.options.validators[v]($el, required, $el.parent());
+    });
+    return clear.indexOf(false) === -1;
   };
   /**
    * Resets form inputs and styles
-   * @param {Object} $form - A jQuery object that should be an HTML form element
+   * @fires Abide#formreset
    */
-  Abide.prototype.resetForm = function($form) {
-    var self = this;
-    var invalidAttr = 'data-invalid';
-    // remove data attributes
-    $('[' + self.invalidAttr + ']', $form).removeAttr(invalidAttr);
-    // remove styles
-    $('.' + self.options.labelErrorClass, $form).not('small').removeClass(self.options.labelErrorClass);
-    $('.' + self.options.inputErrorClass, $form).not('small').removeClass(self.options.inputErrorClass);
-    $('.form-error.is-visible').removeClass('is-visible');
+  Abide.prototype.resetForm = function() {
+    var $form = this.$element,
+        opts = this.options;
+
+    $('.' + opts.labelErrorClass, $form).not('small').removeClass(opts.labelErrorClass);
+    $('.' + opts.inputErrorClass, $form).not('small').removeClass(opts.inputErrorClass);
+    $(opts.formErrorSelector + '.' + opts.formErrorClass).removeClass(opts.formErrorClass);
     $form.find('[data-abide-error]').css('display', 'none');
-    $(':input', $form).not(':button, :submit, :reset, :hidden, [data-abide-ignore]').val('').removeAttr(invalidAttr);
+    $(':input', $form).not(':button, :submit, :reset, :hidden, [data-abide-ignore]').val('').removeAttr('data-invalid');
+    /**
+     * Fires when the form has been reset.
+     * @event Abide#formreset
+     */
+    $form.trigger('formreset.zf.abide', [$form]);
   };
+  /**
+   * Destroys an instance of Abide.
+   * Removes error styles and classes from elements, without resetting their values.
+   */
   Abide.prototype.destroy = function(){
-    //TODO this...
+    var _this = this;
+    this.$element.off('.abide')
+        .find('[data-abide-error]').css('display', 'none');
+    this.$inputs.off('.abide')
+        .each(function(){
+          _this.removeErrorClasses($(this));
+        });
+
+    Foundation.unregisterPlugin(this);
   };
 
   Foundation.plugin(Abide, 'Abide');
@@ -11298,7 +11322,7 @@ Foundation.Motion = Motion;
 
     this._init();
 
-    Foundation.registerPlugin(this);
+    Foundation.registerPlugin(this, 'Accordion');
     Foundation.Keyboard.register('Accordion', {
       'ENTER': 'toggle',
       'SPACE': 'toggle',
@@ -11385,7 +11409,7 @@ Foundation.Motion = Motion;
             _this.down($tabContent);
           }
         }).on('keydown.zf.accordion', function(e){
-          Foundation.Keyboard.handleKey(e, _this, {
+          Foundation.Keyboard.handleKey(e, 'Accordion', {
             toggle: function() {
               _this.toggle($tabContent);
             },
@@ -11532,7 +11556,7 @@ Foundation.Motion = Motion;
 
     this._init();
 
-    Foundation.registerPlugin(this);
+    Foundation.registerPlugin(this, 'AccordionMenu');
     Foundation.Keyboard.register('AccordionMenu', {
       'ENTER': 'toggle',
       'SPACE': 'toggle',
@@ -11647,7 +11671,7 @@ Foundation.Motion = Motion;
           return;
         }
       });
-      Foundation.Keyboard.handleKey(e, _this, {
+      Foundation.Keyboard.handleKey(e, 'AccordionMenu', {
         open: function() {
           if ($target.is(':hidden')) {
             _this.down($target);
@@ -11794,7 +11818,7 @@ Foundation.Motion = Motion;
 
     this._init();
 
-    Foundation.registerPlugin(this);
+    Foundation.registerPlugin(this, 'Drilldown');
     Foundation.Keyboard.register('Drilldown', {
       'ENTER': 'open',
       'SPACE': 'open',
@@ -11835,7 +11859,7 @@ Foundation.Motion = Motion;
   Drilldown.prototype._init = function(){
     this.$submenuAnchors = this.$element.find('li.has-submenu');
     this.$submenus = this.$submenuAnchors.children('[data-submenu]');
-    this.$menuItems = this.$element.find('li:visible').not('.js-drilldown-back').attr('role', 'menuitem');
+    this.$menuItems = this.$element.find('li').not('.js-drilldown-back').attr('role', 'menuitem');
 
     this._prepareMenu();
 
@@ -11929,7 +11953,7 @@ Foundation.Motion = Motion;
           return;
         }
       });
-      Foundation.Keyboard.handleKey(e, _this, {
+      Foundation.Keyboard.handleKey(e, 'Drilldown', {
         next: function() {
           if ($element.is(_this.$submenuAnchors)) {
             _this._show($element);
@@ -12111,7 +12135,7 @@ Foundation.Motion = Motion;
     this.options = $.extend({}, Dropdown.defaults, this.$element.data(), options);
     this._init();
 
-    Foundation.registerPlugin(this);
+    Foundation.registerPlugin(this, 'Dropdown');
     Foundation.Keyboard.register('Dropdown', {
       'ENTER': 'open',
       'SPACE': 'open',
@@ -12169,7 +12193,13 @@ Foundation.Motion = Motion;
      * @option
      * @example true
      */
-    autoFocus: false
+    autoFocus: false,
+    /**
+     * Allows a click on the body to close the dropdown.
+     * @option
+     * @example true
+     */
+    closeOnClick: false
   };
   /**
    * Initializes the plugin by setting/checking options and attributes, adding helper variables, and saving the anchor.
@@ -12328,24 +12358,24 @@ Foundation.Motion = Motion;
       var $target = $(this),
         visibleFocusableElements = Foundation.Keyboard.findFocusable(_this.$element);
 
-      Foundation.Keyboard.handleKey(e, _this, {
+      Foundation.Keyboard.handleKey(e, 'Dropdown', {
         tab_forward: function() {
-          if (this.$element.find(':focus').is(visibleFocusableElements.eq(-1))) { // left modal downwards, setting focus to first element
-            if (this.options.trapFocus) { // if focus shall be trapped
+          if (_this.$element.find(':focus').is(visibleFocusableElements.eq(-1))) { // left modal downwards, setting focus to first element
+            if (_this.options.trapFocus) { // if focus shall be trapped
               visibleFocusableElements.eq(0).focus();
               e.preventDefault();
             } else { // if focus is not trapped, close dropdown on focus out
-              this.close();
+              _this.close();
             }
           }
         },
         tab_backward: function() {
-          if (this.$element.find(':focus').is(visibleFocusableElements.eq(0)) || this.$element.is(':focus')) { // left modal upwards, setting focus to last element
-            if (this.options.trapFocus) { // if focus shall be trapped
+          if (_this.$element.find(':focus').is(visibleFocusableElements.eq(0)) || _this.$element.is(':focus')) { // left modal upwards, setting focus to last element
+            if (_this.options.trapFocus) { // if focus shall be trapped
               visibleFocusableElements.eq(-1).focus();
               e.preventDefault();
             } else { // if focus is not trapped, close dropdown on focus out
-              this.close();
+              _this.close();
             }
           }
         },
@@ -12362,6 +12392,26 @@ Foundation.Motion = Motion;
         }
       });
     });
+  };
+  /**
+   * Adds an event handler to the body to close any dropdowns on a click.
+   * @function
+   * @private
+   */
+  Dropdown.prototype._addBodyHandler = function(){
+     var $body = $(document.body).not(this.$element),
+         _this = this;
+     $body.off('click.zf.dropdown')
+          .on('click.zf.dropdown', function(e){
+            if(_this.$anchor.is(e.target) || _this.$anchor.find(e.target).length) {
+              return;
+            }
+            if(_this.$element.find(e.target).length) {
+              return;
+            }
+            _this.close();
+            $body.off('click.zf.dropdown');
+          });
   };
   /**
    * Opens the dropdown pane, and fires a bubbling event to close other dropdowns.
@@ -12390,6 +12440,7 @@ Foundation.Motion = Motion;
       }
     }
 
+    if(this.options.closeOnClick){ this._addBodyHandler(); }
 
     /**
      * Fires once the dropdown is visible.
@@ -12480,7 +12531,7 @@ Foundation.Motion = Motion;
     Foundation.Nest.Feather(this.$element, 'dropdown');
     this._init();
 
-    Foundation.registerPlugin(this);
+    Foundation.registerPlugin(this, 'DropdownMenu');
     Foundation.Keyboard.register('DropdownMenu', {
       'ENTER': 'open',
       'SPACE': 'open',
@@ -12732,7 +12783,7 @@ Foundation.Motion = Motion;
           });
         }
       }
-      Foundation.Keyboard.handleKey(e, _this, functions);
+      Foundation.Keyboard.handleKey(e, 'DropdownMenu', functions);
 
     });
   };
@@ -12858,17 +12909,13 @@ Foundation.Motion = Motion;
    * @param {Object} element - jQuery object to add the trigger to.
    * @param {Object} options - Overrides to the default plugin settings.
    */
-  function Equalizer(element, options) {
+  function Equalizer(element, options){
     this.$element = element;
     this.options  = $.extend({}, Equalizer.defaults, this.$element.data(), options);
-    this.$window  = $(window);
-    this.name     = 'equalizer';
-    this.attr     = 'data-equalizer';
 
     this._init();
-    this._events();
 
-    Foundation.registerPlugin(this);
+    Foundation.registerPlugin(this, 'Equalizer');
   }
 
   /**
@@ -12882,116 +12929,237 @@ Foundation.Motion = Motion;
      */
     equalizeOnStack: true,
     /**
-     * Amount of time, in ms, to debounce the size checking/equalization. Lower times mean smoother transitions/less performance on mobile.
+     * Enable height equalization row by row.
      * @option
-     * @example 50
+     * @example false
      */
-    throttleInterval: 50
+    equalizeByRow: false,
+    /**
+     * String representing the minimum breakpoint size the plugin should equalize heights on.
+     * @option
+     * @example 'medium'
+     */
+    equalizeOn: ''
   };
 
   /**
    * Initializes the Equalizer plugin and calls functions to get equalizer functioning on load.
    * @private
    */
-  Equalizer.prototype._init = function() {
-    this._reflow();
-  };
+  Equalizer.prototype._init = function(){
+    var eqId = this.$element.attr('data-equalizer') || '';
+    var $watched = this.$element.find('[data-equalizer-watch="' + eqId + '"]');
 
+    this.$watched = $watched.length ? $watched : this.$element.find('[data-equalizer-watch]');
+    this.$element.attr('data-resize', (eqId || Foundation.GetYoDigits(6, 'eq')));
+
+    this.hasNested = this.$element.find('[data-equalizer]').length > 0;
+    this.isNested = this.$element.parentsUntil(document.body, '[data-equalizer]').length > 0;
+    this.isOn = false;
+
+    var imgs = this.$element.find('img');
+    var tooSmall;
+    if(this.options.equalizeOn){
+      tooSmall = this._checkMQ();
+      $(window).on('changed.zf.mediaquery', this._checkMQ.bind(this));
+    }else{
+      this._events();
+    }
+    if((tooSmall !== undefined && tooSmall === false) || tooSmall === undefined){
+      if(imgs.length){
+        Foundation.onImagesLoaded(imgs, this._reflow.bind(this));
+      }else{
+        this._reflow();
+      }
+    }
+
+  };
+  /**
+   * Removes event listeners if the breakpoint is too small.
+   * @private
+   */
+  Equalizer.prototype._pauseEvents = function(){
+    this.isOn = false;
+    this.$element.off('.zf.equalizer resizeme.zf.trigger');
+  };
   /**
    * Initializes events for Equalizer.
    * @private
    */
-  Equalizer.prototype._events = function() {
-    var self = this;
-
-    this.$window
-      .off('.equalizer')
-      .on('resize.fndtn.equalizer', Foundation.util.throttle(function () {
-        self._reflow();
-      }, self.options.throttleInterval));
+  Equalizer.prototype._events = function(){
+    var _this = this;
+    this._pauseEvents();
+    if(this.hasNested){
+      this.$element.on('postequalized.zf.equalizer', function(e){
+        if(e.target !== _this.$element[0]){ _this._reflow(); }
+      });
+    }else{
+      this.$element.on('resizeme.zf.trigger', this._reflow.bind(this));
+    }
+    this.isOn = true;
   };
-
+  /**
+   * Checks the current breakpoint to the minimum required size.
+   * @private
+   */
+  Equalizer.prototype._checkMQ = function(){
+    var tooSmall = !Foundation.MediaQuery.atLeast(this.options.equalizeOn);
+    if(tooSmall){
+      if(this.isOn){
+        this._pauseEvents();
+        this.$watched.css('height', 'auto');
+      }
+    }else{
+      if(!this.isOn){
+        this._events();
+      }
+    }
+    return tooSmall;
+  }
   /**
    * A noop version for the plugin
    * @private
    */
-  Equalizer.prototype._killswitch = function() {
+  Equalizer.prototype._killswitch = function(){
     return;
   };
   /**
    * Calls necessary functions to update Equalizer upon DOM change
    * @private
    */
-  Equalizer.prototype._reflow = function() {
-    var self = this;
-
-    $('[' + this.attr + ']').each(function() {
-      var $eqParent       = $(this),
-          adjustedHeights = [],
-          $images = $eqParent.find('img');
-
-      if ($images.length) {
-        Foundation.onImagesLoaded($images, function() {
-          adjustedHeights = self.getHeights($eqParent);
-          self.applyHeight($eqParent, adjustedHeights);
-        });
+  Equalizer.prototype._reflow = function(){
+    if(!this.options.equalizeOnStack){
+      if(this._isStacked()){
+        this.$watched.css('height', 'auto');
+        return false;
       }
-      else {
-        adjustedHeights = self.getHeights($eqParent);
-        self.applyHeight($eqParent, adjustedHeights);
-      }
-    });
+    }
+    if (this.options.equalizeByRow) {
+      this.getHeightsByRow(this.applyHeightByRow.bind(this));
+    }else{
+      this.getHeights(this.applyHeight.bind(this));
+    }
+  };
+  /**
+   * Manually determines if the first 2 elements are *NOT* stacked.
+   * @private
+   */
+  Equalizer.prototype._isStacked = function(){
+    return this.$watched[0].offsetTop !== this.$watched[1].offsetTop;
   };
   /**
    * Finds the outer heights of children contained within an Equalizer parent and returns them in an array
-   * @param {Object} $eqParent A jQuery instance of an Equalizer container
-   * @returns {Array} heights An array of heights of children within Equalizer container
+   * @param {Function} cb - A non-optional callback to return the heights array to.
+   * @returns {Array} heights - An array of heights of children within Equalizer container
    */
-  Equalizer.prototype.getHeights = function($eqParent) {
-    var eqGroupName = $eqParent.data('equalizer'),
-        eqGroup     = eqGroupName ? $eqParent.find('[' + this.attr + '-watch="' + eqGroupName + '"]:visible') : $eqParent.find('[' + this.attr + '-watch]:visible'),
-        heights;
+  Equalizer.prototype.getHeights = function(cb){
+    var heights = [];
+    for(var i = 0, len = this.$watched.length; i < len; i++){
+      this.$watched[i].style.height = 'auto';
+      heights.push(this.$watched[i].offsetHeight);
+    }
+    cb(heights);
+  };
+  /**
+   * Finds the outer heights of children contained within an Equalizer parent and returns them in an array
+   * @param {Function} cb - A non-optional callback to return the heights array to.
+   * @returns {Array} groups - An array of heights of children within Equalizer container grouped by row with element,height and max as last child
+   */
+  Equalizer.prototype.getHeightsByRow = function(cb) {
+    var lastElTopOffset = this.$watched.first().offset().top,
+        groups = [],
+        group = 0;
+    //group by Row
+    groups[group] = [];
+    for(var i = 0, len = this.$watched.length; i < len; i++){
+      this.$watched[i].style.height = 'auto';
+      //maybe could use this.$watched[i].offsetTop
+      var elOffsetTop = $(this.$watched[i]).offset().top;
+      if (elOffsetTop!=lastElTopOffset) {
+        group++;
+        groups[group] = [];
+        lastElTopOffset=elOffsetTop;
+      };
+      groups[group].push([this.$watched[i],this.$watched[i].offsetHeight]);
+    }
 
-    eqGroup.height('inherit');
-    heights = eqGroup.map(function () { return $(this).outerHeight(false);}).get();
-    
-    return heights;
+    for (var i = 0, len = groups.length; i < len; i++) {
+      var heights = $(groups[i]).map(function () { return this[1]}).get();
+      var max         = Math.max.apply(null, heights);
+      groups[i].push(max);
+    }
+    cb(groups);
   };
   /**
    * Changes the CSS height property of each child in an Equalizer parent to match the tallest
-   * @param {Object} $eqParent - A jQuery instance of an Equalizer container
    * @param {array} heights - An array of heights of children within Equalizer container
-   * @fires Equalizer#preEqualized
-   * @fires Equalizer#postEqualized
+   * @fires Equalizer#preequalized
+   * @fires Equalizer#postequalized
    */
-  Equalizer.prototype.applyHeight = function($eqParent, heights) {
-    var eqGroupName = $eqParent.data('equalizer'),
-        eqGroup     = eqGroupName ? $eqParent.find('['+this.attr+'-watch="'+eqGroupName+'"]:visible') : $eqParent.find('['+this.attr+'-watch]:visible'),
-        max         = Math.max.apply(null, heights);
-
+  Equalizer.prototype.applyHeight = function(heights){
+    var max = Math.max.apply(null, heights);
     /**
      * Fires before the heights are applied
-     * @event Equalizer#preEqualized
+     * @event Equalizer#preequalized
      */
-    $eqParent.trigger('preEqualized.zf.Equalizer');
+    this.$element.trigger('preequalized.zf.equalizer');
 
-    // for now, apply the max height found in the array
-    for (var i = 0; i < eqGroup.length; i++) {
-      $(eqGroup[i]).css('height', max);
-    }
+    this.$watched.css('height', max);
 
     /**
      * Fires when the heights have been applied
-     * @event Equalizer#postEqualized
+     * @event Equalizer#postequalized
      */
-    $eqParent.trigger('postEqualized.zf.Equalizer');
+     this.$element.trigger('postequalized.zf.equalizer');
+  };
+  /**
+   * Changes the CSS height property of each child in an Equalizer parent to match the tallest by row
+   * @param {array} groups - An array of heights of children within Equalizer container grouped by row with element,height and max as last child
+   * @fires Equalizer#preequalized
+   * @fires Equalizer#preequalizedRow
+   * @fires Equalizer#postequalizedRow
+   * @fires Equalizer#postequalized
+   */
+  Equalizer.prototype.applyHeightByRow = function(groups){
+    /**
+     * Fires before the heights are applied
+     */
+    this.$element.trigger('preequalized.zf.equalizer');
+    for (var i = 0, len = groups.length; i < len ; i++) {
+      var groupsILength = groups[i].length,
+          max = groups[i][groupsILength - 1];
+      if (groupsILength<=2) {
+        $(groups[i][0][0]).css({'height':'auto'});
+        continue;
+      };
+      /**
+        * Fires before the heights per row are applied
+        * @event Equalizer#preequalizedRow
+        */
+      this.$element.trigger('preequalizedrow.zf.equalizer');
+      for (var j = 0, lenJ = (groupsILength-1); j < lenJ ; j++) {
+        $(groups[i][j][0]).css({'height':max});
+      }
+      /**
+        * Fires when the heights per row have been applied
+        * @event Equalizer#postequalizedRow
+        */
+      this.$element.trigger('postequalizedrow.zf.equalizer');
+    }
+    /**
+     * Fires when the heights have been applied
+     */
+     this.$element.trigger('postequalized.zf.equalizer');
   };
   /**
    * Destroys an instance of Equalizer.
    * @function
    */
   Equalizer.prototype.destroy = function(){
-    //TODO this.
+    this._pauseEvents();
+    this.$watched.css('height', 'auto');
+
+    Foundation.unregisterPlugin(this);
   };
 
   Foundation.plugin(Equalizer, 'Equalizer');
@@ -13031,7 +13199,7 @@ Foundation.Motion = Motion;
     this._init();
     this._events();
 
-    Foundation.registerPlugin(this);
+    Foundation.registerPlugin(this, 'Interchange');
   }
 
   /**
@@ -13068,7 +13236,7 @@ Foundation.Motion = Motion;
    * @private
    */
   Interchange.prototype._events = function() {
-    $(window).on('resize.fndtn.interchange', Foundation.util.throttle(this._reflow.bind(this), 50));
+    $(window).on('resize.zf.interchange', Foundation.util.throttle(this._reflow.bind(this), 50));
   };
 
   /**
@@ -13155,7 +13323,6 @@ Foundation.Motion = Motion;
     // Replacing images
     if (this.$element[0].nodeName === 'IMG') {
       this.$element.attr('src', path).load(function() {
-        _this.$element.trigger('replaced.zf.interchange');
         _this.currentPath = path;
       });
     }
@@ -13167,10 +13334,11 @@ Foundation.Motion = Motion;
     else {
       $.get(path, function(response) {
         _this.$element.html(response);
-        _this.$element.trigger('replaced.zf.interchange');
+        $(response).foundation();
         _this.currentPath = path;
       });
     }
+    this.$element.trigger('replaced.zf.interchange');
   };
   /**
    * Destroys an instance of interchange.
@@ -13211,7 +13379,7 @@ Foundation.Motion = Motion;
 
     this._init();
 
-    Foundation.registerPlugin(this);
+    Foundation.registerPlugin(this, 'Magellan');
   }
 
   /**
@@ -13429,7 +13597,7 @@ function OffCanvas(element, options) {
   this._init();
   this._events();
 
-  Foundation.registerPlugin(this);
+  Foundation.registerPlugin(this, 'OffCanvas');
 }
 
 OffCanvas.defaults = {
@@ -13484,7 +13652,13 @@ OffCanvas.defaults = {
    * TODO improve the regex testing for this.
    * @example reveal-for-large
    */
-  revealClass: 'reveal-for-'
+  revealClass: 'reveal-for-',
+  /**
+   * Triggers optional focus trapping when opening an offcanvas. Sets tabindex of [data-off-canvas-content] to -1 for accessibility purposes.
+   * @option
+   * @example true
+   */
+  trapFocus: false
 };
 
 /**
@@ -13533,7 +13707,7 @@ OffCanvas.prototype._init = function() {
  * @private
  */
 OffCanvas.prototype._events = function() {
-  this.$element.on({
+  this.$element.off('.zf.trigger .zf.offcanvas').on({
     'open.zf.trigger': this.open.bind(this),
     'close.zf.trigger': this.close.bind(this),
     'toggle.zf.trigger': this.toggle.bind(this),
@@ -13572,17 +13746,25 @@ OffCanvas.prototype._setMQChecker = function(){
 OffCanvas.prototype.reveal = function(isRevealed){
   var $closer = this.$element.find('[data-close]');
   if(isRevealed){
+    this.close();
+    this.isRevealed = true;
     // if(!this.options.forceTop){
     //   var scrollPos = parseInt(window.pageYOffset);
     //   this.$element[0].style.transform = 'translate(0,' + scrollPos + 'px)';
     // }
     // if(this.options.isSticky){ this._stick(); }
+    this.$element.off('open.zf.trigger toggle.zf.trigger');
     if($closer.length){ $closer.hide(); }
   }else{
+    this.isRevealed = false;
     // if(this.options.isSticky || !this.options.forceTop){
     //   this.$element[0].style.transform = '';
     //   $(window).off('scroll.zf.offcanvas');
     // }
+    this.$element.on({
+      'open.zf.trigger': this.open.bind(this),
+      'toggle.zf.trigger': this.toggle.bind(this)
+    });
     if($closer.length){
       $closer.show();
     }
@@ -13597,7 +13779,7 @@ OffCanvas.prototype.reveal = function(isRevealed){
  * @fires OffCanvas#opened
  */
 OffCanvas.prototype.open = function(event, trigger) {
-  if (this.$element.hasClass('is-open')){ return; }
+  if (this.$element.hasClass('is-open') || this.isRevealed){ return; }
   var _this = this,
       $body = $(document.body);
   $('body').scrollTop(0);
@@ -13619,13 +13801,15 @@ OffCanvas.prototype.open = function(event, trigger) {
 
     _this.$element
       .addClass('is-open')
-      .attr('aria-hidden', 'false')
-      .trigger('opened.zf.offcanvas');
 
     // if(_this.options.isSticky){
     //   _this._stick();
     // }
   });
+  this.$element.attr('aria-hidden', 'false')
+      .trigger('opened.zf.offcanvas');
+
+
   if(trigger){
     this.$lastTrigger = trigger.attr('aria-expanded', 'true');
   }
@@ -13634,6 +13818,32 @@ OffCanvas.prototype.open = function(event, trigger) {
       _this.$element.find('a, button').eq(0).focus();
     });
   }
+  if(this.options.trapFocus){
+    $('[data-off-canvas-content]').attr('tabindex', '-1');
+    this._trapFocus();
+  }
+};
+/**
+ * Traps focus within the offcanvas on open.
+ * @private
+ */
+OffCanvas.prototype._trapFocus = function(){
+  var focusable = Foundation.Keyboard.findFocusable(this.$element),
+      first = focusable.eq(0),
+      last = focusable.eq(-1);
+
+  focusable.off('.zf.offcanvas').on('keydown.zf.offcanvas', function(e){
+    if(e.which === 9 || e.keycode === 9){
+      if(e.target === last[0] && !e.shiftKey){
+        e.preventDefault();
+        first.focus();
+      }
+      if(e.target === first[0] && e.shiftKey){
+        e.preventDefault();
+        last.focus();
+      }
+    }
+  });
 };
 /**
  * Allows the offcanvas to appear sticky utilizing translate properties.
@@ -13657,19 +13867,19 @@ OffCanvas.prototype.open = function(event, trigger) {
 /**
  * Closes the off-canvas menu.
  * @function
+ * @param {Function} cb - optional cb to fire after closure.
  * @fires OffCanvas#closed
  */
-OffCanvas.prototype.close = function() {
-  if(!this.$element.hasClass('is-open')){ return; }
+OffCanvas.prototype.close = function(cb) {
+  if(!this.$element.hasClass('is-open') || this.isRevealed){ return; }
 
   var _this = this;
 
-   Foundation.Move(this.options.transitionTime, this.$element, function(){
-    $('[data-off-canvas-wrapper]').removeClass('is-off-canvas-open is-open-'+_this.options.position);
-
-    _this.$element.removeClass('is-open');
+  //  Foundation.Move(this.options.transitionTime, this.$element, function(){
+  $('[data-off-canvas-wrapper]').removeClass('is-off-canvas-open is-open-' + _this.options.position);
+  _this.$element.removeClass('is-open');
     // Foundation._reflow();
-  });
+  // });
   this.$element.attr('aria-hidden', 'true')
     /**
      * Fires when the off-canvas menu opens.
@@ -13684,6 +13894,10 @@ OffCanvas.prototype.close = function() {
   // }
 
   this.$lastTrigger.attr('aria-expanded', 'false');
+  if(this.options.trapFocus){
+    $('[data-off-canvas-content]').removeAttr('tabindex');
+  }
+
 };
 
 /**
@@ -13719,7 +13933,11 @@ OffCanvas.prototype._handleKeyboard = function(event) {
  * @function
  */
 OffCanvas.prototype.destroy = function(){
-  //TODO make this...
+  this.close();
+  this.$element.off('.zf.trigger .zf.offcanvas');
+  this.$exiter.off('.zf.offcanvas');
+
+  Foundation.unregisterPlugin(this);
 };
 
 Foundation.plugin(OffCanvas, 'OffCanvas');
@@ -13739,7 +13957,7 @@ Foundation.plugin(OffCanvas, 'OffCanvas');
   /**
    * Creates a new instance of an orbit carousel.
    * @class
-   * @param {jQuery} element - jQuery object to make into an accordion menu.
+   * @param {jQuery} element - jQuery object to make into an Orbit Carousel.
    * @param {Object} options - Overrides to the default plugin settings.
    */
   function Orbit(element, options){
@@ -13748,7 +13966,7 @@ Foundation.plugin(OffCanvas, 'OffCanvas');
 
     this._init();
 
-    Foundation.registerPlugin(this);
+    Foundation.registerPlugin(this, 'Orbit');
     Foundation.Keyboard.register('Orbit', {
         'ltr': {
           'ARROW_RIGHT': 'next',
@@ -14038,7 +14256,7 @@ Foundation.plugin(OffCanvas, 'OffCanvas');
 
     this.$wrapper.add(this.$bullets).on('keydown.zf.orbit', function(e){
       // handle keyboard event with keyboard util
-      Foundation.Keyboard.handleKey(e, _this, {
+      Foundation.Keyboard.handleKey(e, 'Orbit', {
         next: function() {
           _this.changeSlide(true);
         },
@@ -14196,7 +14414,7 @@ Foundation.plugin(OffCanvas, 'OffCanvas');
     this._init();
     this._events();
 
-    Foundation.registerPlugin(this);
+    Foundation.registerPlugin(this, 'ResponsiveMenu');
   }
 
   ResponsiveMenu.defaults = {};
@@ -14315,7 +14533,7 @@ function ResponsiveToggle(element, options) {
   this._init();
   this._events();
 
-  Foundation.registerPlugin(this);
+  Foundation.registerPlugin(this, 'ResponsiveToggle');
 }
 
 ResponsiveToggle.defaults = {
@@ -14423,7 +14641,7 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
     this.options = $.extend({}, Reveal.defaults, this.$element.data(), options);
     this._init();
 
-    Foundation.registerPlugin(this);
+    Foundation.registerPlugin(this, 'Reveal');
     Foundation.Keyboard.register('Reveal', {
       'ENTER': 'open',
       'SPACE': 'open',
@@ -14647,7 +14865,7 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
   /**
    * Opens the modal controlled by `this.$anchor`, and closes all others by default.
    * @function
-   * @fires Reveal#closeAll
+   * @fires Reveal#closeme
    * @fires Reveal#open
    */
   Reveal.prototype.open = function(){
@@ -14666,7 +14884,7 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
         /**
          * Fires immediately before the modal opens.
          * Closes any other modals that are currently open
-         * @event Reveal#closeAll
+         * @event Reveal#closeme
          */
         _this.$element.trigger('closeme.zf.reveal', _this.id);
       }
@@ -14728,11 +14946,11 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
     }
     if(this.options.closeOnEsc){
       $(window).on('keydown.zf.reveal', function(e){
-        Foundation.Keyboard.handleKey(e, _this, {
+        Foundation.Keyboard.handleKey(e, 'Reveal', {
           close: function() {
-            if (this.options.closeOnEsc) {
-              this.close();
-              this.$anchor.focus();
+            if (_this.options.closeOnEsc) {
+              _this.close();
+              _this.$anchor.focus();
             }
           }
         });
@@ -14746,15 +14964,15 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
     this.$element.on('keydown.zf.reveal', function(e) {
       var $target = $(this);
       // handle keyboard event with keyboard util
-      Foundation.Keyboard.handleKey(e, _this, {
+      Foundation.Keyboard.handleKey(e, 'Reveal', {
         tab_forward: function() {
-          if (this.$element.find(':focus').is(_this.focusableElements.eq(-1))) { // left modal downwards, setting focus to first element
+          if (_this.$element.find(':focus').is(_this.focusableElements.eq(-1))) { // left modal downwards, setting focus to first element
             _this.focusableElements.eq(0).focus();
             e.preventDefault();
           }
         },
         tab_backward: function() {
-          if (this.$element.find(':focus').is(_this.focusableElements.eq(0)) || this.$element.is(':focus')) { // left modal upwards, setting focus to last element
+          if (_this.$element.find(':focus').is(_this.focusableElements.eq(0)) || _this.$element.is(':focus')) { // left modal upwards, setting focus to last element
             _this.focusableElements.eq(-1).focus();
             e.preventDefault();
           }
@@ -14765,13 +14983,13 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
               _this.$anchor.focus();
             }, 1);
           } else if ($target.is(_this.focusableElements)) { // dont't trigger if acual element has focus (i.e. inputs, links, ...)
-            this.open();
+            _this.open();
           }
         },
         close: function() {
-          if (this.options.closeOnEsc) {
-            this.close();
-            this.$anchor.focus();
+          if (_this.options.closeOnEsc) {
+            _this.close();
+            _this.$anchor.focus();
           }
         }
       });
@@ -14901,7 +15119,7 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
 
     this._init();
 
-    Foundation.registerPlugin(this);
+    Foundation.registerPlugin(this, 'Slider');
     Foundation.Keyboard.register('Slider', {
       'ltr': {
         'ARROW_RIGHT': 'increase',
@@ -15044,7 +15262,7 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
     if(this.handles[1]){
       this.options.doubleSided = true;
       this.$handle2 = this.handles.eq(1);
-      this.$input2 = this.inputs.length ? this.inputs.eq(1) : $('#' + this.$handle2.attr('aria-controls'));
+      this.$input2 = this.inputs.length > 1 ? this.inputs.eq(1) : $('#' + this.$handle2.attr('aria-controls'));
 
       if(!this.inputs[1]){
         this.inputs = this.inputs.add(this.$input2);
@@ -15293,7 +15511,7 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
       var _$handle = $(this);
 
       // handle keyboard event with keyboard util
-      Foundation.Keyboard.handleKey(e, _this, {
+      Foundation.Keyboard.handleKey(e, 'Slider', {
         decrease: function() {
           newValue = oldValue - _this.options.step;
         },
@@ -15384,13 +15602,13 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
 
     this._init();
 
-    Foundation.registerPlugin(this);
+    Foundation.registerPlugin(this, 'Sticky');
   }
   Sticky.defaults = {
     /**
      * Customizable container template. Add your own classes for styling and sizing.
      * @option
-     * @example '<div data-sticky-container class="small-6 columns"></div>'
+     * @example '&lt;div data-sticky-container class="small-6 columns"&gt;&lt;/div&gt;'
      */
     container: '<div data-sticky-container></div>',
     /**
@@ -15457,7 +15675,6 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
 
   /**
    * Initializes the sticky element by adding classes, getting/setting dimensions, breakpoints and attributes
-   * Also triggered by Foundation._reflow
    * @function
    * @private
    */
@@ -15478,14 +15695,12 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
 
     this.scrollCount = this.options.checkEvery;
     this.isStuck = false;
-    // console.log(this.options.anchor, this.options.topAnchor);
-    if(this.options.topAnchor !== ''){
-      this._parsePoints();
-      // console.log(this.points[0]);
-    }else{
-      this.$anchor = this.options.anchor ? $('#' + this.options.anchor) : $(document.body);
-    }
 
+    if(this.options.anchor !== ''){
+      this.$anchor = $('#' + this.options.anchor);
+    }else{
+      this._parsePoints();
+    }
 
     this._setSizes(function(){
       _this._calc(false);
@@ -15502,22 +15717,27 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
         btm = this.options.btmAnchor,
         pts = [top, btm],
         breaks = {};
-    for(var i = 0, len = pts.length; i < len && pts[i]; i++){
-      var pt;
-      if(typeof pts[i] === 'number'){
-        pt = pts[i];
-      }else{
-        var place = pts[i].split(':'),
-            anchor = $('#' + place[0]);
+    if(top && btm){
 
-        pt = anchor.offset().top;
-        if(place[1] && place[1].toLowerCase() === 'bottom'){
-          pt += anchor[0].getBoundingClientRect().height;
+      for(var i = 0, len = pts.length; i < len && pts[i]; i++){
+        var pt;
+        if(typeof pts[i] === 'number'){
+          pt = pts[i];
+        }else{
+          var place = pts[i].split(':'),
+              anchor = $('#' + place[0]);
+
+          pt = anchor.offset().top;
+          if(place[1] && place[1].toLowerCase() === 'bottom'){
+            pt += anchor[0].getBoundingClientRect().height;
+          }
         }
+        breaks[i] = pt;
       }
-      breaks[i] = pt;
+    }else{
+      breaks = {0: 1, 1: document.documentElement.scrollHeight};
     }
-      // console.log(breaks);
+
     this.points = breaks;
     return;
   };
@@ -15528,19 +15748,11 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
    * @param {String} id - psuedo-random id for unique scroll event listener.
    */
   Sticky.prototype._events = function(id){
-    // console.log('called');
     var _this = this,
-        scrollListener = 'scroll.zf.' + id;
+        scrollListener = this.scrollListener = 'scroll.zf.' + id;
     if(this.isOn){ return; }
     if(this.canStick){
       this.isOn = true;
-      // this.$anchor.off('change.zf.sticky')
-      //             .on('change.zf.sticky', function(){
-      //               _this._setSizes(function(){
-      //                 _this._calc(false);
-      //               });
-      //             });
-
       $(window).off(scrollListener)
                .on(scrollListener, function(e){
                  if(_this.scrollCount === 0){
@@ -15577,7 +15789,6 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
    */
   Sticky.prototype._pauseListeners = function(scrollListener){
     this.isOn = false;
-    // this.$anchor.off('change.zf.sticky');
     $(window).off(scrollListener);
 
     /**
@@ -15677,7 +15888,7 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
       css[stickTo] = 0;
       css[notStuckTo] = anchorPt;
     }
-    
+
     css['left'] = '';
     this.isStuck = false;
     this.$element.removeClass('is-stuck is-at-' + stickTo)
@@ -15705,7 +15916,6 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
         comp = window.getComputedStyle(this.$container[0]),
         pdng = parseInt(comp['padding-right'], 10);
 
-    // console.log(this.$anchor);
     if(this.$anchor && this.$anchor.length){
       this.anchorHeight = this.$anchor[0].getBoundingClientRect().height;
     }else{
@@ -15786,7 +15996,7 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
                  .off('resizeme.zf.trigger');
 
     this.$anchor.off('change.zf.sticky');
-    $(window).off('scroll.zf.sticky');
+    $(window).off(this.scrollListener);
 
     if(this.wasWrapped){
       this.$element.unwrap();
@@ -15829,7 +16039,7 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
     this.options = $.extend({}, Tabs.defaults, this.$element.data(), options);
 
     this._init();
-    Foundation.registerPlugin(this);
+    Foundation.registerPlugin(this, 'Tabs');
     Foundation.Keyboard.register('Tabs', {
       'ENTER': 'open',
       'SPACE': 'open',
@@ -15993,7 +16203,7 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
       });
 
       // handle keyboard event with keyboard util
-      Foundation.Keyboard.handleKey(e, _this, {
+      Foundation.Keyboard.handleKey(e, 'Tabs', {
         open: function() {
           $element.find('[role="tab"]').focus();
           _this._handleTabChange($element);
@@ -16139,7 +16349,7 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
     this._init();
     this._events();
 
-    Foundation.registerPlugin(this);
+    Foundation.registerPlugin(this, 'Toggler');
   }
 
   Toggler.defaults = {
@@ -16287,7 +16497,7 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
     this.isClick = false;
     this._init();
 
-    Foundation.registerPlugin(this);
+    Foundation.registerPlugin(this, 'Tooltip');
   }
 
   Tooltip.defaults = {
@@ -16343,7 +16553,7 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
     /**
      * Custom template to be used to generate markup for tooltip.
      * @option
-     * @example '<div class="tooltip"></div>'
+     * @example '&lt;div class="tooltip"&gt;&lt;/div&gt;'
      */
     template: '',
     /**
@@ -16637,7 +16847,7 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
     this.$element
       .on('focus.zf.tooltip', function(e){
         isFocus = true;
-        console.log(_this.isClick);
+        // console.log(_this.isClick);
         if(_this.isClick){
           return false;
         }else{
@@ -16694,10 +16904,10 @@ Foundation.plugin(ResponsiveToggle, 'ResponsiveToggle');
 }(jQuery, window.document, window.Foundation);
 
 /*! modernizr 3.2.0 (Custom Build) | MIT *
- * http://modernizr.com/download/?-adownload-animation-appearance-applicationcache-audio-audiopreload-backgroundcliptext-backgroundsize-bdi-beacon-bgpositionshorthand-bgpositionxy-bgrepeatspace_bgrepeatround-bgsizecover-bloburls-blobworkers-borderradius-boxshadow-boxsizing-canvas-capture-checked-classlist-cookies-cors-cryptography-cssall-cssanimations-csscalc-csschunit-csscolumns-cssescape-cssexunit-cssfilters-cssgradients-csshyphens_softhyphens_softhyphensfind-cssinvalid-cssmask-csspointerevents-csspositionsticky-csspseudoanimations-csspseudotransitions-cssreflections-cssremunit-cssresize-cssscrollbar-csstransforms-csstransforms3d-csstransitions-cssvalid-cssvhunit-cssvmaxunit-cssvminunit-cssvwunit-cubicbezierrange-customevent-datalistelem-dataset-datauri-dataview-dataworkers-devicemotion_deviceorientation-directory-displaytable-documentfragment-ellipsis-emoji-es5-es5array-es5date-es5function-es5object-es6array-es6math-es6number-es6object-es6string-eventlistener-eventsource-exiforientation-fetch-fileinput-filereader-filesystem-flexbox-flexboxlegacy-flexboxtweener-flexwrap-fontface-formattribute-formvalidation-generatedcontent-generators-geolocation-getusermedia-hashchange-hiddenscroll-history-hsla-htmlimports-indexeddb-indexeddbblob-inlinesvg-input-inputformaction-inputformenctype-inputformmethod-inputformtarget-inputtypes-intl-json-lastchild-localizednumber-localstorage-lowbandwidth-lowbattery-matchmedia-mathml-mediaqueries-microdata-multiplebgs-mutationobserver-notification-nthchild-objectfit-olreversed-oninput-opacity-outputelem-overflowscrolling-pagevisibility-picture-pointerevents-pointerlock-postmessage-preserve3d-progressbar_meter-promises-proximity-queryselector-regions-requestanimationframe-rgba-sandbox-scriptasync-scriptdefer-seamless-search-serviceworker-sessionstorage-shapes-sharedworkers-siblinggeneral-sizes-srcdoc-srcset-stylescoped-subpixelfont-supports-svg-svgasimg-svgclippaths-svgfilters-svgforeignobject-target-template-templatestrings-textalignlast-textareamaxlength-textshadow-time-touchevents-transferables-typedarrays-unicoderange-userselect-vibrate-video-videoautoplay-webaudio-webgl-webglextensions-webintents-webp-webpalpha-webpanimation-websockets-websocketsbinary-webworkers-willchange-wrapflow-xhr2-xhrresponsetype-xhrresponsetypearraybuffer-xhrresponsetypeblob-xhrresponsetypedocument-xhrresponsetypejson-xhrresponsetypetext !*/
+ * http://modernizr.com/download/?-adownload-animation-appearance-applicationcache-audio-audiopreload-backgroundcliptext-backgroundsize-bdi-beacon-bgpositionshorthand-bgpositionxy-bgrepeatspace_bgrepeatround-bgsizecover-bloburls-borderradius-boxshadow-boxsizing-canvas-capture-checked-classlist-cookies-cors-cryptography-cssall-cssanimations-csscalc-csschunit-csscolumns-cssescape-cssexunit-cssfilters-cssgradients-csshyphens_softhyphens_softhyphensfind-cssinvalid-cssmask-csspointerevents-csspositionsticky-csspseudoanimations-csspseudotransitions-cssreflections-cssremunit-cssresize-cssscrollbar-csstransforms-csstransforms3d-csstransitions-cssvalid-cssvhunit-cssvmaxunit-cssvminunit-cssvwunit-cubicbezierrange-customevent-datalistelem-dataset-datauri-dataview-dataworkers-devicemotion_deviceorientation-directory-displaytable-documentfragment-ellipsis-emoji-es5-es5array-es5date-es5function-es5object-es6array-es6math-es6number-es6object-es6string-eventlistener-eventsource-exiforientation-fetch-fileinput-filereader-filesystem-flexbox-flexboxlegacy-flexboxtweener-flexwrap-fontface-formattribute-formvalidation-generatedcontent-generators-geolocation-getusermedia-hashchange-hiddenscroll-history-hsla-htmlimports-indexeddb-indexeddbblob-inlinesvg-input-inputformaction-inputformenctype-inputformmethod-inputformtarget-inputtypes-intl-json-lastchild-localizednumber-localstorage-lowbandwidth-lowbattery-matchmedia-mathml-mediaqueries-microdata-multiplebgs-mutationobserver-notification-nthchild-objectfit-olreversed-oninput-opacity-outputelem-overflowscrolling-pagevisibility-picture-pointerevents-pointerlock-postmessage-preserve3d-progressbar_meter-promises-proximity-queryselector-regions-requestanimationframe-rgba-sandbox-scriptasync-scriptdefer-seamless-search-serviceworker-sessionstorage-shapes-sharedworkers-siblinggeneral-sizes-srcdoc-srcset-stylescoped-subpixelfont-supports-svg-svgasimg-svgclippaths-svgfilters-svgforeignobject-target-template-templatestrings-textalignlast-textareamaxlength-textshadow-time-touchevents-transferables-typedarrays-unicoderange-userselect-vibrate-video-videoautoplay-webaudio-webgl-webglextensions-webintents-webp-webpalpha-webpanimation-websockets-websocketsbinary-webworkers-willchange-wrapflow-xhr2-xhrresponsetype-xhrresponsetypearraybuffer-xhrresponsetypeblob-xhrresponsetypedocument-xhrresponsetypejson-xhrresponsetypetext !*/
 !function(window,document,undefined){function is(A,e){return typeof A===e}function testRunner(){var A,e,t,r,n,i,o;for(var d in tests)if(tests.hasOwnProperty(d)){if(A=[],e=tests[d],e.name&&(A.push(e.name.toLowerCase()),e.options&&e.options.aliases&&e.options.aliases.length))for(t=0;t<e.options.aliases.length;t++)A.push(e.options.aliases[t].toLowerCase());for(r=is(e.fn,"function")?e.fn():e.fn,n=0;n<A.length;n++)i=A[n],o=i.split("."),1===o.length?Modernizr[o[0]]=r:(!Modernizr[o[0]]||Modernizr[o[0]]instanceof Boolean||(Modernizr[o[0]]=new Boolean(Modernizr[o[0]])),Modernizr[o[0]][o[1]]=r),classes.push((r?"":"no-")+o.join("-"))}}function setClasses(A){var e=docElement.className,t=Modernizr._config.classPrefix||"";if(isSVG&&(e=e.baseVal),Modernizr._config.enableJSClass){var r=new RegExp("(^|\\s)"+t+"no-js(\\s|$)");e=e.replace(r,"$1"+t+"js$2")}Modernizr._config.enableClasses&&(e+=" "+t+A.join(" "+t),isSVG?docElement.className.baseVal=e:docElement.className=e)}function createElement(){return"function"!=typeof document.createElement?document.createElement(arguments[0]):isSVG?document.createElementNS.call(document,"http://www.w3.org/2000/svg",arguments[0]):document.createElement.apply(document,arguments)}function contains(A,e){return!!~(""+A).indexOf(e)}function getBody(){var A=document.body;return A||(A=createElement(isSVG?"svg":"body"),A.fake=!0),A}function injectElementWithStyles(A,e,t,r){var n,i,o,d,a="modernizr",s=createElement("div"),l=getBody();if(parseInt(t,10))for(;t--;)o=createElement("div"),o.id=r?r[t]:a+(t+1),s.appendChild(o);return n=createElement("style"),n.type="text/css",n.id="s"+a,(l.fake?l:s).appendChild(n),l.appendChild(s),n.styleSheet?n.styleSheet.cssText=A:n.appendChild(document.createTextNode(A)),s.id=a,l.fake&&(l.style.background="",l.style.overflow="hidden",d=docElement.style.overflow,docElement.style.overflow="hidden",docElement.appendChild(l)),i=e(s,A),l.fake?(l.parentNode.removeChild(l),docElement.style.overflow=d,docElement.offsetHeight):s.parentNode.removeChild(s),!!i}function domToCSS(A){return A.replace(/([A-Z])/g,function(A,e){return"-"+e.toLowerCase()}).replace(/^ms-/,"-ms-")}function nativeTestProps(A,e){var t=A.length;if("CSS"in window&&"supports"in window.CSS){for(;t--;)if(window.CSS.supports(domToCSS(A[t]),e))return!0;return!1}if("CSSSupportsRule"in window){for(var r=[];t--;)r.push("("+domToCSS(A[t])+":"+e+")");return r=r.join(" or "),injectElementWithStyles("@supports ("+r+") { #modernizr { position: absolute; } }",function(A){return"absolute"==getComputedStyle(A,null).position})}return undefined}function cssToDOM(A){return A.replace(/([a-z])-([a-z])/g,function(A,e,t){return e+t.toUpperCase()}).replace(/^-/,"")}function testProps(A,e,t,r){function n(){o&&(delete mStyle.style,delete mStyle.modElem)}if(r=is(r,"undefined")?!1:r,!is(t,"undefined")){var i=nativeTestProps(A,t);if(!is(i,"undefined"))return i}for(var o,d,a,s,l,c=["modernizr","tspan"];!mStyle.style;)o=!0,mStyle.modElem=createElement(c.shift()),mStyle.style=mStyle.modElem.style;for(a=A.length,d=0;a>d;d++)if(s=A[d],l=mStyle.style[s],contains(s,"-")&&(s=cssToDOM(s)),mStyle.style[s]!==undefined){if(r||is(t,"undefined"))return n(),"pfx"==e?s:!0;try{mStyle.style[s]=t}catch(u){}if(mStyle.style[s]!=l)return n(),"pfx"==e?s:!0}return n(),!1}function fnBind(A,e){return function(){return A.apply(e,arguments)}}function testDOMProps(A,e,t){var r;for(var n in A)if(A[n]in e)return t===!1?A[n]:(r=e[A[n]],is(r,"function")?fnBind(r,t||e):r);return!1}function testPropsAll(A,e,t,r,n){var i=A.charAt(0).toUpperCase()+A.slice(1),o=(A+" "+cssomPrefixes.join(i+" ")+i).split(" ");return is(e,"string")||is(e,"undefined")?testProps(o,e,r,n):(o=(A+" "+domPrefixes.join(i+" ")+i).split(" "),testDOMProps(o,e,t))}function addTest(A,e){if("object"==typeof A)for(var t in A)hasOwnProp(A,t)&&addTest(t,A[t]);else{A=A.toLowerCase();var r=A.split("."),n=Modernizr[r[0]];if(2==r.length&&(n=n[r[1]]),"undefined"!=typeof n)return Modernizr;e="function"==typeof e?e():e,1==r.length?Modernizr[r[0]]=e:(!Modernizr[r[0]]||Modernizr[r[0]]instanceof Boolean||(Modernizr[r[0]]=new Boolean(Modernizr[r[0]])),Modernizr[r[0]][r[1]]=e),setClasses([(e&&0!=e?"":"no-")+r.join("-")]),Modernizr._trigger(A,e)}return Modernizr}function testAllProps(A,e,t){return testPropsAll(A,undefined,undefined,e,t)}function roundedEquals(A,e){return A-1===e||A===e||A+1===e}var tests=[],ModernizrProto={_version:"3.2.0",_config:{classPrefix:"",enableClasses:!0,enableJSClass:!0,usePrefixes:!0},_q:[],on:function(A,e){var t=this;setTimeout(function(){e(t[A])},0)},addTest:function(A,e,t){tests.push({name:A,fn:e,options:t})},addAsyncTest:function(A){tests.push({name:null,fn:A})}},Modernizr=function(){};Modernizr.prototype=ModernizrProto,Modernizr=new Modernizr;var classes=[],docElement=document.documentElement,isSVG="svg"===docElement.nodeName.toLowerCase();Modernizr.addTest("applicationcache","applicationCache"in window),Modernizr.addTest("audio",function(){var A=createElement("audio"),e=!1;try{(e=!!A.canPlayType)&&(e=new Boolean(e),e.ogg=A.canPlayType('audio/ogg; codecs="vorbis"').replace(/^no$/,""),e.mp3=A.canPlayType("audio/mpeg;").replace(/^no$/,""),e.opus=A.canPlayType('audio/ogg; codecs="opus"').replace(/^no$/,""),e.wav=A.canPlayType('audio/wav; codecs="1"').replace(/^no$/,""),e.m4a=(A.canPlayType("audio/x-m4a;")||A.canPlayType("audio/aac;")).replace(/^no$/,""))}catch(t){}return e}),Modernizr.addTest("canvas",function(){var A=createElement("canvas");return!(!A.getContext||!A.getContext("2d"))}),Modernizr.addTest("cookies",function(){try{document.cookie="cookietest=1";var A=-1!=document.cookie.indexOf("cookietest=");return document.cookie="cookietest=1; expires=Thu, 01-Jan-1970 00:00:01 GMT",A}catch(e){return!1}}),Modernizr.addTest("cors","XMLHttpRequest"in window&&"withCredentials"in new XMLHttpRequest);var omPrefixes="Moz O ms Webkit",cssomPrefixes=ModernizrProto._config.usePrefixes?omPrefixes.split(" "):[];ModernizrProto._cssomPrefixes=cssomPrefixes;var modElem={elem:createElement("modernizr")};Modernizr._q.push(function(){delete modElem.elem});var mStyle={style:modElem.elem.style};Modernizr._q.unshift(function(){delete mStyle.style});var domPrefixes=ModernizrProto._config.usePrefixes?omPrefixes.toLowerCase().split(" "):[];ModernizrProto._domPrefixes=domPrefixes,ModernizrProto.testAllProps=testPropsAll;var atRule=function(A){var e,t=prefixes.length,r=window.CSSRule;if("undefined"==typeof r)return undefined;if(!A)return!1;if(A=A.replace(/^@/,""),e=A.replace(/-/g,"_").toUpperCase()+"_RULE",e in r)return"@"+A;for(var n=0;t>n;n++){var i=prefixes[n],o=i.toUpperCase()+"_"+e;if(o in r)return"@-"+i.toLowerCase()+"-"+A}return!1};ModernizrProto.atRule=atRule;var prefixed=ModernizrProto.prefixed=function(A,e,t){return 0===A.indexOf("@")?atRule(A):(-1!=A.indexOf("-")&&(A=cssToDOM(A)),e?testPropsAll(A,e,t):testPropsAll(A,"pfx"))},crypto=prefixed("crypto",window);Modernizr.addTest("crypto",!!prefixed("subtle",crypto)),Modernizr.addTest("customevent","CustomEvent"in window&&"function"==typeof window.CustomEvent),Modernizr.addTest("dataview","undefined"!=typeof DataView&&"getFloat64"in DataView.prototype),Modernizr.addTest("canvastext",function(){return Modernizr.canvas===!1?!1:"function"==typeof createElement("canvas").getContext("2d").fillText}),Modernizr.addTest("emoji",function(){if(!Modernizr.canvastext)return!1;var A=window.devicePixelRatio||1,e=12*A,t=createElement("canvas"),r=t.getContext("2d");return r.fillStyle="#f00",r.textBaseline="top",r.font="32px Arial",r.fillText("🐨",0,0),0!==r.getImageData(e,e,1,1).data[0]}),Modernizr.addTest("eventlistener","addEventListener"in window);var hasOwnProp;!function(){var A={}.hasOwnProperty;hasOwnProp=is(A,"undefined")||is(A.call,"undefined")?function(A,e){return e in A&&is(A.constructor.prototype[e],"undefined")}:function(e,t){return A.call(e,t)}}(),ModernizrProto._l={},ModernizrProto.on=function(A,e){this._l[A]||(this._l[A]=[]),this._l[A].push(e),Modernizr.hasOwnProperty(A)&&setTimeout(function(){Modernizr._trigger(A,Modernizr[A])},0)},ModernizrProto._trigger=function(A,e){if(this._l[A]){var t=this._l[A];setTimeout(function(){var A,r;for(A=0;A<t.length;A++)(r=t[A])(e)},0),delete this._l[A]}},Modernizr._q.push(function(){ModernizrProto.addTest=addTest}),Modernizr.addAsyncTest(function(){var A=new Image;A.onerror=function(){addTest("exiforientation",!1,{aliases:["exif-orientation"]})},A.onload=function(){addTest("exiforientation",2!==A.width,{aliases:["exif-orientation"]})},A.src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/4QAiRXhpZgAASUkqAAgAAAABABIBAwABAAAABgASAAAAAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAABAAIDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD+/iiiigD/2Q=="}),Modernizr.addTest("geolocation","geolocation"in navigator);var hasEvent=function(A){function e(e,r){var n;return e?(r&&"string"!=typeof r||(r=createElement(r||"div")),e="on"+e,n=e in r,!n&&t&&(r.setAttribute||(r=createElement("div")),r.setAttribute(e,""),n="function"==typeof r[e],r[e]!==A&&(r[e]=A),r.removeAttribute(e)),n):!1}var t=!("onblur"in document.documentElement);return e}();ModernizrProto.hasEvent=hasEvent,Modernizr.addTest("hashchange",function(){return hasEvent("hashchange",window)===!1?!1:document.documentMode===undefined||document.documentMode>7});var testStyles=ModernizrProto.testStyles=injectElementWithStyles;Modernizr.addTest("hiddenscroll",function(){return testStyles("#modernizr {width:100px;height:100px;overflow:scroll}",function(A){return A.offsetWidth===A.clientWidth})}),Modernizr.addTest("history",function(){var A=navigator.userAgent;return-1===A.indexOf("Android 2.")&&-1===A.indexOf("Android 4.0")||-1===A.indexOf("Mobile Safari")||-1!==A.indexOf("Chrome")||-1!==A.indexOf("Windows Phone")?window.history&&"pushState"in window.history:!1}),addTest("htmlimports","import"in createElement("link"));var indexeddb=prefixed("indexedDB",window);Modernizr.addTest("indexeddb",!!indexeddb),indexeddb&&Modernizr.addTest("indexeddb.deletedatabase","deleteDatabase"in indexeddb),Modernizr.addAsyncTest(function(){var A,e,t=prefixed("indexedDB",window),r="detect-blob-support",n=!1;if(!Modernizr.indexeddb||!Modernizr.indexeddb.deleteDatabase)return!1;try{t.deleteDatabase(r).onsuccess=function(){A=t.open(r,1),A.onupgradeneeded=function(){A.result.createObjectStore("store")},A.onsuccess=function(){e=A.result;try{e.transaction("store","readwrite").objectStore("store").put(new Blob,"key"),n=!0}catch(i){n=!1}finally{addTest("indexeddbblob",n),e.close(),t.deleteDatabase(r)}}}}catch(i){addTest("indexeddbblob",!1)}});var inputElem=createElement("input"),inputattrs="autocomplete autofocus list placeholder max min multiple pattern required step".split(" "),attrs={};Modernizr.input=function(A){for(var e=0,t=A.length;t>e;e++)attrs[A[e]]=!!(A[e]in inputElem);return attrs.list&&(attrs.list=!(!createElement("datalist")||!window.HTMLDataListElement)),attrs}(inputattrs),Modernizr.addTest("inputsearchevent",hasEvent("search"));var inputtypes="search tel url email datetime date month week time datetime-local number range color".split(" "),inputs={};Modernizr.inputtypes=function(A){for(var e,t,r,n=A.length,i=":)",o=0;n>o;o++)inputElem.setAttribute("type",e=A[o]),r="text"!==inputElem.type&&"style"in inputElem,r&&(inputElem.value=i,inputElem.style.cssText="position:absolute;visibility:hidden;",/^range$/.test(e)&&inputElem.style.WebkitAppearance!==undefined?(docElement.appendChild(inputElem),t=document.defaultView,r=t.getComputedStyle&&"textfield"!==t.getComputedStyle(inputElem,null).WebkitAppearance&&0!==inputElem.offsetHeight,docElement.removeChild(inputElem)):/^(search|tel)$/.test(e)||(r=/^(url|email|number)$/.test(e)?inputElem.checkValidity&&inputElem.checkValidity()===!1:inputElem.value!=i)),inputs[A[o]]=!!r;return inputs}(inputtypes),Modernizr.addTest("intl",!!prefixed("Intl",window)),Modernizr.addTest("json","JSON"in window&&"parse"in JSON&&"stringify"in JSON),Modernizr.addTest("olreversed","reversed"in createElement("ol")),Modernizr.addTest("mathml",function(){var A;return testStyles("#modernizr{position:absolute;display:inline-block}",function(e){e.innerHTML+="<math><mfrac><mi>xx</mi><mi>yy</mi></mfrac></math>",A=e.offsetHeight>e.offsetWidth}),A}),Modernizr.addTest("notification","Notification"in window&&"permission"in window.Notification&&"requestPermission"in window.Notification),Modernizr.addTest("pagevisibility",!!prefixed("hidden",document,!1)),Modernizr.addTest("pointerevents",function(){var A=!1,e=domPrefixes.length;for(A=Modernizr.hasEvent("pointerdown");e--&&!A;)hasEvent(domPrefixes[e]+"pointerdown")&&(A=!0);return A}),Modernizr.addTest("pointerlock",!!prefixed("exitPointerLock",document)),Modernizr.addTest("postmessage","postMessage"in window),Modernizr.addAsyncTest(function(){function A(){clearTimeout(e),window.removeEventListener("deviceproximity",A),addTest("proximity",!0)}var e,t=300;"ondeviceproximity"in window&&"onuserproximity"in window?(window.addEventListener("deviceproximity",A),e=setTimeout(function(){window.removeEventListener("deviceproximity",A),addTest("proximity",!1)},t)):addTest("proximity",!1)}),Modernizr.addTest("queryselector","querySelector"in document&&"querySelectorAll"in document),Modernizr.addTest("requestanimationframe",!!prefixed("requestAnimationFrame",window),{aliases:["raf"]}),Modernizr.addTest("serviceworker","serviceWorker"in navigator),Modernizr.addTest("svg",!!document.createElementNS&&!!document.createElementNS("http://www.w3.org/2000/svg","svg").createSVGRect),Modernizr.addTest("templatestrings",function(){var supports;try{eval("``"),supports=!0}catch(e){}return!!supports});var prefixes=ModernizrProto._config.usePrefixes?" -webkit- -moz- -o- -ms- ".split(" "):[];ModernizrProto._prefixes=prefixes,Modernizr.addTest("touchevents",function(){var A;if("ontouchstart"in window||window.DocumentTouch&&document instanceof DocumentTouch)A=!0;else{var e=["@media (",prefixes.join("touch-enabled),("),"heartz",")","{#modernizr{top:9px;position:absolute}}"].join("");testStyles(e,function(e){A=9===e.offsetTop})}return A}),Modernizr.addTest("typedarrays","ArrayBuffer"in window),Modernizr.addTest("unicoderange",function(){return Modernizr.testStyles('@font-face{font-family:"unicodeRange";src:local("Arial");unicode-range:U+0020,U+002E}#modernizr span{font-size:20px;display:inline-block;font-family:"unicodeRange",monospace}#modernizr .mono{font-family:monospace}',function(A){for(var e=[".",".","m","m"],t=0;t<e.length;t++){var r=createElement("span");r.innerHTML=e[t],r.className=t%2?"mono":"",A.appendChild(r),e[t]=r.clientWidth}return e[0]!==e[1]&&e[2]===e[3]})}),Modernizr.addTest("vibrate",!!prefixed("vibrate",navigator)),Modernizr.addTest("video",function(){var A=createElement("video"),e=!1;try{(e=!!A.canPlayType)&&(e=new Boolean(e),e.ogg=A.canPlayType('video/ogg; codecs="theora"').replace(/^no$/,""),e.h264=A.canPlayType('video/mp4; codecs="avc1.42E01E"').replace(/^no$/,""),e.webm=A.canPlayType('video/webm; codecs="vp8, vorbis"').replace(/^no$/,""),e.vp9=A.canPlayType('video/webm; codecs="vp9"').replace(/^no$/,""),e.hls=A.canPlayType('application/x-mpegURL; codecs="avc1.42E01E"').replace(/^no$/,""))}catch(t){}return e}),Modernizr.addTest("webintents",!!prefixed("startActivity",navigator)),Modernizr.addTest("webanimations","animate"in createElement("div")),Modernizr.addTest("webgl",function(){var A=createElement("canvas"),e="probablySupportsContext"in A?"probablySupportsContext":"supportsContext";return e in A?A[e]("webgl")||A[e]("experimental-webgl"):"WebGLRenderingContext"in window}),Modernizr.addTest("websockets","WebSocket"in window&&2===window.WebSocket.CLOSING),Modernizr.addTest("adownload",!window.externalHost&&"download"in createElement("a")),Modernizr.addAsyncTest(function(){function A(t){clearTimeout(e);var n=t!==undefined&&"loadeddata"===t.type?!0:!1;r.removeEventListener("loadeddata",A,!1),addTest("audiopreload",n),r.parentNode.removeChild(r)}var e,t=300,r=createElement("audio"),n=r.style;if(!(Modernizr.audio&&"preload"in r))return void addTest("audiopreload",!1);n.position="absolute",n.height=0,n.width=0;try{if(Modernizr.audio.mp3)r.src="data:audio/mpeg;base64,//MUxAAB6AXgAAAAAPP+c6nf//yi/6f3//MUxAMAAAIAAAjEcH//0fTX6C9Lf//0//MUxA4BeAIAAAAAAKX2/6zv//+IlR4f//MUxBMCMAH8AAAAABYWalVMQU1FMy45//MUxBUB0AH0AAAAADkuM1VVVVVVVVVV//MUxBgBUATowAAAAFVVVVVVVVVVVVVV";else if(Modernizr.audio.m4a)r.src="data:audio/x-m4a;base64,AAAAGGZ0eXBNNEEgAAACAGlzb21pc28yAAAACGZyZWUAAAAfbWRhdN4EAABsaWJmYWFjIDEuMjgAAAFoAQBHAAACiG1vb3YAAABsbXZoZAAAAAB8JbCAfCWwgAAAA+gAAAAYAAEAAAEAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAG0dHJhawAAAFx0a2hkAAAAD3wlsIB8JbCAAAAAAQAAAAAAAAAYAAAAAAAAAAAAAAAAAQAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAABUG1kaWEAAAAgbWRoZAAAAAB8JbCAfCWwgAAArEQAAAQAVcQAAAAAAC1oZGxyAAAAAAAAAABzb3VuAAAAAAAAAAAAAAAAU291bmRIYW5kbGVyAAAAAPttaW5mAAAAEHNtaGQAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAL9zdGJsAAAAW3N0c2QAAAAAAAAAAQAAAEttcDRhAAAAAAAAAAEAAAAAAAAAAAACABAAAAAArEQAAAAAACdlc2RzAAAAAAMZAAEABBFAFQAAAAABftAAAAAABQISCAYBAgAAABhzdHRzAAAAAAAAAAEAAAABAAAEAAAAABxzdHNjAAAAAAAAAAEAAAABAAAAAQAAAAEAAAAUc3RzegAAAAAAAAAXAAAAAQAAABRzdGNvAAAAAAAAAAEAAAAoAAAAYHVkdGEAAABYbWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAbWRpcmFwcGwAAAAAAAAAAAAAAAAraWxzdAAAACOpdG9vAAAAG2RhdGEAAAABAAAAAExhdmY1Mi42NC4y";else if(Modernizr.audio.ogg)r.src="data:audio/ogg;base64,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lFJKKaWUUkoppZRSSimllFJKKaWUUkqppJRSSimllFJKKaWUUkoppZRSSimllFJKKaWUUkoppZRSSimllFJKKaWUUkoppZRSSimllFJKKaWUUkoppZRSSimllFJKKaWUUkoppZRSSimllFJKKaWUUkoppZRSSimllFJKKaWUUkoppZRSSimllFJKKaWUUkoppZRSSimllFJKKaWUUkoppZRSSimllFJKKaWUUkoppZRSSimllFJKKaWUUkoppZRSSimllFJKKaWUUkoppZRSSimllFJKKaWUUkoppZRSSimllFJKKaWUUkoppZRSSimllFJKKaWUUkoplVJKKaWUUkoppZRSSimllFJKKaWUUkoppZRSSimllFJKKaWUUkoppZRSSimllFJKKaWUUkoppZRSSimllFJKKaWUUkoppZRSSimllFJKKaWUUkoppZRSCgCQinAAkHowoQwUGrISAEgFAACMUUopxpyDEDHmGGPQSSgpYsw5xhyUklLlHIQQUmktt8o5CCGk1FJtmXNSWosx5hgz56SkFFvNOYdSUoux5ppr7qS0VmuuNedaWqs115xzzbm0FmuuOdecc8sx15xzzjnnGHPOOeecc84FAOA0OACAHtiwOsJJ0VhgoSErAYBUAAACGaUYc8456BBSjDnnHIQQIoUYc845CCFUjDnnHHQQQqgYc8w5CCGEkDnnHIQQQgghcw466CCEEEIHHYQQQgihlM5BCCGEEEooIYQQQgghhBA6CCGEEEIIIYQQQgghhFJKCCGEEEIJoZRQAABggQMAQIANqyOcFI0FFhqyEgAAAgCAHJagUs6EQY5Bjw1BylEzDUJMOdGZYk5qMxVTkDkQnXQSGWpB2V4yCwAAgCAAIMAEEBggKPhCCIgxAABBiMwQCYVVsMCgDBoc5gHAA0SERACQmKBIu7iALgNc0MVdB0IIQhCCWBxAAQk4OOGGJ97whBucoFNU6iAAAAAAAAwA4AEA4KAAIiKaq7C4wMjQ2ODo8AgAAAAAABYA+AAAOD6AiIjmKiwuMDI0Njg6PAIAAAAAAAAAAICAgAAAAAAAQAAAAICAT2dnUwAE7AwAAAAAAAD/QwAAAgAAADuydfsFAQEBAQEACg4ODg==";else{if(!Modernizr.audio.wav)return void addTest("audiopreload",!1);r.src="data:audio/wav;base64,UklGRvwZAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YdgZAAAAAAEA/v8CAP//AAABAP////8DAPz/BAD9/wEAAAAAAAAAAAABAP7/AgD//wAAAQD//wAAAQD//wAAAQD+/wIA//8AAAAAAAD//wIA/v8BAAAA//8BAAAA//8BAP//AQAAAP//AQD//wEAAAD//wEA//8BAP//AQD//wEA//8BAP//AQD+/wMA/f8DAP3/AgD+/wIA/////wMA/f8CAP7/AgD+/wMA/f8CAP7/AgD//wAAAAAAAAAAAQD+/wIA/v8CAP7/AwD9/wIA/v8BAAEA/v8CAP7/AQAAAAAAAAD//wEAAAD//wIA/f8DAP7/AQD//wEAAAD//wEA//8CAP7/AQD//wIA/v8CAP7/AQAAAAAAAAD//wEAAAAAAAAA//8BAP//AgD9/wQA+/8FAPz/AgAAAP//AgD+/wEAAAD//wIA/v8CAP3/BAD8/wQA/P8DAP7/AwD8/wQA/P8DAP7/AQAAAAAA//8BAP//AgD+/wEAAAD//wIA/v8BAP//AQD//wEAAAD//wEA//8BAAAAAAAAAP//AgD+/wEAAAAAAAAAAAD//wEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP//AgD+/wIA/v8BAP//AQABAP7/AQD//wIA/v8CAP3/AwD/////AgD9/wMA/v8BAP//AQAAAP//AQD//wEA//8BAP//AAABAP//AAABAP//AQD//wAAAAACAP3/AwD9/wIA//8BAP//AQD//wEA//8BAP//AgD9/wMA/v8AAAIA/f8CAAAA/v8EAPv/BAD9/wIAAAD+/wQA+v8HAPr/BAD+/wEAAAD//wIA/f8EAPz/BAD7/wUA/P8EAPz/AwD+/wEAAAD//wEAAAAAAP//AgD8/wUA+/8FAPz/AwD9/wIA//8AAAEA/v8CAP//AQD//wAAAAABAP//AgD9/wMA/f8EAPz/AwD+/wAAAwD7/wUA/P8DAP7/AQAAAP//AgD+/wEAAQD+/wIA/v8BAAEA/v8CAP7/AQAAAP//AgD9/wMA/f8DAP7/AgD+/wEAAAAAAAEA//8AAAEA/v8DAP3/AgD//wEA//8BAP7/AwD9/wMA/v8BAP//AQAAAP//AgD9/wMA/v8BAP//AQAAAP//AgD+/wEAAQD+/wIA/////wIA//8AAAEA/f8DAP//AAABAP////8DAP3/AwD+/wEA//8BAP//AQAAAAAA//8BAP//AQD//wEA//8BAP//AAAAAAEA//8BAP7/AgD//wEA//8AAAAAAAAAAAAAAAD//wIA/v8BAAAA//8BAAEA/v8BAAAA//8DAPz/AwD+/wIA/v8CAP3/AwD+/wEAAAD//wEA//8BAAAA//8BAAAA/v8EAPv/BAD+/wAAAAABAP7/AgD//wAAAAABAP7/AgD//wAAAAAAAAAAAAABAP3/BAD8/wQA/f8BAAAAAAABAP7/AgD+/wIA/v8CAP7/AgD+/wIA/v8BAAAAAAD//wIA/f8DAP7/AAABAP//AAACAPz/BAD9/wIA//8AAP//AwD9/wMA/P8EAP3/AwD9/wIA//8BAP//AQD+/wMA/f8DAP7/AAABAP//AQAAAP//AQD//wIA/f8DAP7/AQAAAP//AQAAAAAA//8CAP7/AQABAP7/AgD+/wEAAQD+/wIA/v8CAP////8CAP7/AgD//wAAAAABAP7/AwD9/wIAAAD+/wMA/f8CAP//AQD+/wMA/f8CAP//AAACAPz/BQD6/wUA/v///wIA/v8CAP3/BAD7/wYA+v8FAPz/AwD/////AgD+/wEAAAD//wEAAAD//wIA/f8DAP7/AQAAAP//AgD//wAA//8BAAAAAAAAAP//AQD//wEA//8AAAIA/f8DAP3/AgAAAP//AQD//wEA//8AAAEA//8BAP////8CAP//AAABAP3/BAD9/wIA/v8BAAEA//8BAP7/AgD//wEA//8AAAEA//8BAP//AAAAAAEA//8BAP7/AgD//wEA//8AAAAAAQD+/wIA/v8BAAAAAAD//wIA/v8BAAAAAAAAAAAAAQD+/wMA/f8CAP//AQD//wIA/f8DAP7/AQD//wEA//8CAP7/AAABAP7/AwD9/wMA/v8AAAEA//8BAAAAAAD//wIA/v8BAAAA//8CAP7/AgD+/wEA//8CAP7/AgD//wAAAAAAAAAAAQD//wEA/v8DAPz/BQD8/wIA//8AAAEAAAD//wEA//8BAP//AQAAAAAA//8BAP//AgD+/wEAAAAAAP//AQD+/wMA/////wEA/v8CAP//AQD//wEA//8AAAEA//8BAAAA/v8EAPz/AwD+/wEAAAAAAAAA//8CAP7/AQD//wEA//8BAP//AAABAP7/AwD9/wIA//8BAP//AQD//wEA//8AAAEA/v8EAPv/BAD9/wIA//8BAP7/AwD9/wIA//8AAAEA//8BAP//AQD//wAAAQD//wEAAAD+/wMA/v8AAAIA/f8DAP7/AQD//wAAAQD+/wMA/f8CAP//AAABAP7/AgD+/wMA/f8CAP7/AQABAP7/AgD+/wIA/v8CAP7/AwD8/wMA//8AAAEA//8AAAAAAAABAP//AQD//wAAAQD//wIA/f8DAP3/AwD+/wAAAgD9/wIA//8AAAEAAAD+/wMA/P8FAPv/BAD9/wIA//8AAP//AgD+/wIA/v8BAAAAAAD//wEAAAAAAP//AQD//wEA//8BAP//AAABAP7/AwD9/wIA//8BAP//AAABAP//AQD//wAAAQD//wEA//8BAP//AAABAAAA//8BAP7/AwD9/wMA/f8DAP3/AgD//wEA//8BAP7/AgD//wAAAgD8/wQA/f8CAP//AQD+/wMA/f8CAP7/AgD//wAAAAAAAAAAAAABAP7/AwD9/wIA/v8DAP3/AwD9/wIA/v8DAPz/BQD7/wQA/f8CAP7/AwD9/wMA/f8CAP//AQAAAP7/AwD+/wEA//8AAAEAAAAAAP//AAABAP//AQAAAP7/AwD9/wMA/f8CAP//AQD//wEA//8AAAIA/f8CAAAA//8BAAAA//8BAAAA/v8EAPv/BAD9/wIA//8AAAEA/v8CAP//AAABAP//AAABAP//AAABAP7/AwD8/wQA/f8CAAAA/v8DAP3/AwD9/wMA/v8BAAAA//8BAAAA//8CAP7/AQAAAAAAAAAAAAAA//8CAP7/AgD+/wIA/v8CAP7/AgD//wAAAQD//wAAAQD//wAAAQD//wAAAQD+/wIA//8AAAAAAQD+/wMA/f8CAP//AQD//wEA//8AAAEA/v8DAP3/AgD//wAAAAABAP7/AwD9/wIA//8AAAEA/v8DAP3/AgD//wAAAAABAP7/AwD8/wMA/v8CAP//AAD//wIA/v8CAP7/AQABAP7/AQAAAP//AgD/////AQD//wEAAAD//wEA/v8EAPv/BAD9/wMA/v8BAAAA//8BAAEA/P8GAPr/BQD8/wMA/v8BAAAA//8CAP7/AQABAP3/BAD7/wYA+/8EAPz/AwD//wEA//8BAP7/BAD8/wMA/v8AAAIA/v8BAAAA//8BAAAA//8BAAAA//8CAP3/AwD+/wAAAgD8/wUA/P8DAP7/AAABAAAAAAD//wEAAAD//wIA/f8DAP7/AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAEA/f8EAPz/AwD/////AgD+/wIA/f8DAP7/AgD+/wEA//8CAP7/AQD//wEAAAAAAP//AQAAAP//AgD9/wMA/v8BAAAA//8BAP//AQAAAP//AAACAP3/BAD7/wQA/v8BAAAA//8BAP//AQAAAP//AQAAAP7/BAD7/wUA+/8EAP3/AgD//wAAAQD+/wIA//8AAAEA/v8CAP//AQD+/wEAAAAAAAAAAAD//wEA//8CAP3/AwD9/wIA//8AAAAAAAAAAAAA//8BAP//AgD+/wEA//8CAP7/AQAAAP//AgD/////AgD/////AgD+/wIA//8AAP//AQABAP7/AgD9/wMA/v8CAP////8BAAAAAAAAAAAA//8CAP////8DAPz/AwD+/wEAAAAAAP//AQD//wEAAAD//wEAAAD+/wQA+/8FAPz/AgAAAP//AgD9/wMA/v8BAAAAAAD//wEAAAD//wIA/v8BAAAAAAD//wIA/v8BAAAA//8BAAAA//8CAP7/AQD//wEA//8BAAAA//8BAP//AAABAP//AQAAAP7/AgD//wEA//8AAAAAAQD+/wMA/P8EAP7///8DAPz/BQD8/wEAAQD+/wMA/v8AAAEA//8BAP//AQD//wEA/v8CAP//AQD//wAAAAABAAAA//8BAP//AQAAAAAA//8BAP//AgD+/wAAAQD//wIA/f8CAP//AQAAAP7/AwD9/wMA/v8BAP//AAABAP//AgD9/wIA//8BAAAA//8BAAAA//8CAP3/AwD+/wEAAAD+/wQA/P8DAP7/AAACAP7/AQAAAP//AQAAAP//AQAAAP//AgD9/wIAAAD//wIA/f8DAP7/AQD//wEA//8CAP7/AQD//wAAAQD//wEA//8AAAAAAQD//wEAAAD9/wUA+/8FAPz/AgD//wAAAQD//wAAAQD+/wMA/f8BAAEA/v8CAP7/AgD+/wIA/v8BAAAAAAAAAAAAAAD//wIA/v8CAP////8CAP7/AgD+/wIA/v8CAP7/AQAAAP//AQAAAP//AQD//wAAAQD//wAAAQD+/wMA/f8CAAAA/v8DAP3/AgAAAP//AQAAAP7/AwD9/wMA/v8BAP//AQD//wEAAAD+/wMA/f8CAAAA/v8CAP//AAAAAAEA//8AAAEA/v8DAP3/AwD9/wIA//8BAP//AgD8/wQA/v8BAAAA/v8CAP//AQD//wAAAAAAAAEA/f8EAPz/BAD9/wIA//8AAAAAAAABAP//AAAAAAAAAAABAP3/BAD9/wIA/v8BAAEA//8AAAAA//8CAP7/AgD9/wQA+/8FAPv/BQD8/wMA/f8DAP3/AwD+/wAAAgD9/wMA/f8CAAAA/v8EAPv/BQD7/wUA/P8DAP///v8DAP3/BAD8/wMA/f8DAP7/AQD//wEAAAD//wEA/v8CAAAA/v8CAP7/AgD//wAAAAAAAAAAAQD+/wIA//8AAAEA/v8DAPz/BAD9/wIA//8AAP//AgD//wEA/v8BAAAAAQD//wAAAAAAAAEA//8AAAEA//8BAP//AAABAP//AQD+/wIA/v8DAPz/BAD8/wQA/f8BAAAAAQD+/wMA/P8DAP//AAAAAAAAAAD//wMA+/8FAP3/AQABAP3/BAD8/wMA/v8BAAAA//8CAP3/AwD+/wEAAQD9/wMA/f8EAPz/BAD7/wQA/v8BAAEA/f8DAP7/AQAAAP//AgD+/wEAAAD//wIA/v8CAP7/AgD+/wEAAQD//wEA/v8CAP7/BAD7/wQA/f8CAAAA//8AAAAAAAABAP//AQD+/wEAAQD+/wMA/f8BAAEA/v8DAPz/AwD/////AwD8/wQA/P8DAP7/AgD//wAA//8BAAAAAAAAAP//AgD+/wEAAAD//wIA/v8BAAAA//8CAP3/AgD//wAAAQD+/wIA/v8BAAAA//8CAP7/AgD+/wEA//8CAP3/BAD7/wQA/v8BAAAA//8AAAEAAAD//wIA/f8DAP7/AgD+/wIA/v8CAP7/AgD+/wEAAAAAAP//AgD9/wMA/v8BAP//AgD9/wMA/v8AAAEA//8BAP//AQD//wEA//8AAAEA/v8EAPz/AgD//wAAAQAAAP//AAABAP//AQD//wEAAAD//wEA//8BAAEA/f8DAP7/AQABAP3/AwD+/wIA/////wEAAAAAAAAAAAD//wIA/v8CAP////8CAP7/AgD//wAA//8CAP3/BAD9/wAAAgD9/wMA/v8BAP//AQAAAP//AQAAAP//AgD9/wMA/f8EAPz/AwD+/wEAAAAAAAAAAAD//wIA/f8EAP3/AAABAAAA//8CAP7/AQAAAP//AQAAAAAA//8BAP//AQAAAP//AQAAAP//AQAAAP//AgD9/wMA/v8BAP//AQAAAP//AQD//wIA/v8CAP3/BAD9/wEAAAD//wEAAQD9/wMA/f8CAAAA/v8DAP3/AgD//wAAAQD+/wIA/v8CAP7/AQAAAP//AgD+/wEAAAAAAP//AwD7/wUA/f8BAAEA/v8BAAEA/v8DAP3/AgD//wEA//8BAP//AQD//wEA//8CAP3/BAD7/wQA/////wIA/v8AAAIA/v8CAP3/BAD7/wUA/P8DAP3/AwD9/wMA/v8AAAIA/v8CAP7/AgD+/wIA//8AAAEA/v8CAP7/AgD//wAAAAD//wEAAAAAAAAA//8BAP7/BAD7/wUA/P8CAAAA//8BAP//AQAAAP//AgD9/wMA/v8BAAAA//8BAAAA//8CAP3/AwD+/wEA//8CAP3/AwD+/wAAAwD8/wIAAAD//wIA/////wIA/v8CAP7/AgD+/wEAAAAAAAAAAAAAAP//AgD+/wIA//8AAAAA//8CAP7/AgD+/wEA//8CAP3/AwD9/wMA/v8BAP7/AwD9/wMA/f8CAP//AQD+/wIA//8BAP//AQD+/wMA/v8BAAAA//8BAAAA//8CAP7/AQAAAP//AgD+/wIA/v8CAP//AAAAAAEA//8BAP//AAABAAAA//8BAP//AQD//wEA//8BAP//AQAAAP//AQD//wEAAAD//wIA/f8CAAAA//8BAAAA//8BAP//AAABAP//AQD//wAAAAAAAAEA/v8CAP//AQD//wAAAAABAP7/AwD9/wIAAAD+/wIA//8BAP//AgD9/wMA/f8DAP7/AgD+/wEAAAAAAAEA/v8CAP7/AgD//wAAAAAAAAAAAAAAAP//AgD/////AgD9/wQA/f8BAAAAAAAAAAEA/f8DAP////8DAP3/AQABAP7/AgD//wAAAQD+/wMA/f8CAP7/AQABAP7/AwD7/wYA+v8FAP3/AQABAP7/AgD+/wMA/f8CAP7/AwD+/wEA//8BAP//AQAAAP7/BQD5/wcA+v8FAPz/AwD+/wIA/v8BAAAA//8DAPv/BQD8/wMA/////wEAAAAAAAAAAAD//wIA/f8DAP7/AQAAAP//AQAAAP//AgD+/wIA/v8BAAEA/f8EAPz/AwD+/wEA//8CAP7/AQD//wEA//8CAP7/AQAAAP//AgD+/wEAAAAAAAAAAAAAAAAAAAD//wIA/f8EAPz/AwD+/wEA//8CAP7/AgD+/wEAAQD+/wEAAQD+/wIA/////wIA//8AAAAAAAAAAAAAAAD//wEAAAAAAP//AgD9/wMA/v8BAP//AQAAAP//AQD//wEA//8BAP//AQD//wEA//8BAP//AQAAAP7/AwD9/wMA/v8BAP7/AwD9/wMA/v8BAP//AAABAP//AQD//wAAAAABAP//AAAAAAAAAQD//wEA/v8CAAAA/v8EAPv/BAD9/wIAAAD+/wMA/P8DAP//AAAAAP//AQD//wIA/f8DAP3/AwD9/wMA/v8BAAAA//8BAAAA//8CAP3/AwD9/wQA+/8FAPv/BQD8/wMA/v8BAAAA//8BAP//AgD+/wEAAAD//wIA/v8BAAEA/f8DAP3/AgAAAP//AQD//wAAAQD//wEA//8BAP//AQD//wEA/v8DAP3/AgAAAP7/AwD9/wIAAAD//wEAAAD//wIA/f8DAP7/AgD9/wQA+/8FAPz/AgAAAP//AgD9/wIA//8BAP//AQD//wEA//8BAP//AQD//wIA/f8DAP3/AgD//wAAAQD+/wIA/v8BAAEA/v8CAP7/AgD+/wMA/P8DAP//AAABAP7/AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEA/v8CAP3/BAD8/wMA/v8BAAAAAAD//wEAAAAAAAAAAAD//wEAAAAAAAAA//8BAP//AgD+/wEA//8CAP3/AwD9/wMA/f8EAPv/BAD+/wAAAQD//wEA//8BAP//AAABAP//AQD//wEAAAD//wEA//8BAP//AgD9/wMA/v8AAAIA/f8DAP7/AAACAP3/AwD+/wEA//8BAP//AQAAAP//AQAAAP7/AwD9/wMA/v8AAAEA//8BAP//AAAAAAEA//8AAAEA/v8CAP//AAAAAAEA/v8DAPz/BAD9/wEAAQD+/wEAAQD9/wQA/P8DAP7/AQAAAAAAAAAAAAAAAAAAAAAAAQD+/wIA/////wIA/v8BAAAA//8BAP//AQD//wEA//8BAAAA/v8EAPz/AwD///7/BAD8/wMA/////wIA/v8CAP////8CAP7/AgD+/wIA/v8CAP////8CAP7/AwD9/wIA/v8CAP//AAABAP7/AwD9/wEAAQD+/wMA/f8CAP//AAAAAAEA/v8DAPz/BAD9/wIA/v8CAP7/AgD//wAAAAD//wIA/v8CAP7/AQAAAAAA//8CAP7/AgD+/wIA/v8CAP7/AwD8/wUA+v8GAPv/AwD//wAAAAAAAAAA//8DAPv/BQD9/wAAAgD9/wMA/v8BAP//AQAAAP//AgD9/wMA/v8BAAAA//8BAAAAAAAAAP//AQAAAAAAAAD//wEA//8CAP3/AwD+/wAAAgD+/wEAAAD//wIA/v8CAP7/AgD/////AwD8/wUA/P8CAP//AQD//wIA/f8DAP3/AwD+/wAAAQD+/wMA/f8DAP3/AgD//wAAAQD//wEA//8BAP7/AwD+/wEA//8AAAEA//8CAPz/BAD9/wIA//8AAAEA/v8DAPz/BAD9/wIA//8AAAEA/v8CAP7/AgD//wEA/f8EAPz/BAD+////AgD//wAAAQD//wAAAQD//wEA//8BAP7/AwD+/wEA"}}catch(i){return void addTest("audiopreload",!1)}r.setAttribute("preload","auto"),r.style.cssText="display:none",docElement.appendChild(r),setTimeout(function(){r.addEventListener("loadeddata",A,!1),
 e=setTimeout(A,t)},0)}),Modernizr.addTest("webaudio",function(){var A="webkitAudioContext"in window,e="AudioContext"in window;return Modernizr._config.usePrefixes?A||e:e}),Modernizr.addTest("lowbattery",function(){var A=.2,e=prefixed("battery",navigator);return!!(e&&!e.charging&&e.level<=A)}),Modernizr.addTest("cssall","all"in docElement.style),ModernizrProto.testAllProps=testAllProps,Modernizr.addTest("cssanimations",testAllProps("animationName","a",!0)),Modernizr.addTest("appearance",testAllProps("appearance")),Modernizr.addTest("backgroundcliptext",function(){return testAllProps("backgroundClip","text")}),Modernizr.addTest("bgpositionshorthand",function(){var A=createElement("a"),e=A.style,t="right 10px bottom 10px";return e.cssText="background-position: "+t+";",e.backgroundPosition===t}),Modernizr.addTest("bgpositionxy",function(){return testAllProps("backgroundPositionX","3px",!0)&&testAllProps("backgroundPositionY","5px",!0)}),Modernizr.addTest("bgrepeatround",testAllProps("backgroundRepeat","round")),Modernizr.addTest("bgrepeatspace",testAllProps("backgroundRepeat","space")),Modernizr.addTest("backgroundsize",testAllProps("backgroundSize","100%",!0)),Modernizr.addTest("bgsizecover",testAllProps("backgroundSize","cover")),Modernizr.addTest("borderradius",testAllProps("borderRadius","0px",!0)),Modernizr.addTest("boxshadow",testAllProps("boxShadow","1px 1px",!0)),Modernizr.addTest("boxsizing",testAllProps("boxSizing","border-box",!0)&&(document.documentMode===undefined||document.documentMode>7)),Modernizr.addTest("csscalc",function(){var A="width:",e="calc(10px);",t=createElement("a");return t.style.cssText=A+prefixes.join(e+A),!!t.style.length}),Modernizr.addTest("checked",function(){return testStyles("#modernizr {position:absolute} #modernizr input {margin-left:10px} #modernizr :checked {margin-left:20px;display:block}",function(A){var e=createElement("input");return e.setAttribute("type","checkbox"),e.setAttribute("checked","checked"),A.appendChild(e),20===e.offsetLeft})}),Modernizr.addTest("csschunit",function(){var A,e=modElem.elem.style;try{e.fontSize="3ch",A=-1!==e.fontSize.indexOf("ch")}catch(t){A=!1}return A}),function(){Modernizr.addTest("csscolumns",function(){var A=!1,e=testAllProps("columnCount");try{(A=!!e)&&(A=new Boolean(A))}catch(t){}return A});for(var A,e,t=["Width","Span","Fill","Gap","Rule","RuleColor","RuleStyle","RuleWidth","BreakBefore","BreakAfter","BreakInside"],r=0;r<t.length;r++)A=t[r].toLowerCase(),e=testAllProps("column"+t[r]),("breakbefore"===A||"breakafter"===A||"breakinside"==A)&&(e=e||testAllProps(t[r])),Modernizr.addTest("csscolumns."+A,e)}(),Modernizr.addTest("cubicbezierrange",function(){var A=createElement("a");return A.style.cssText=prefixes.join("transition-timing-function:cubic-bezier(1,0,0,1.1); "),!!A.style.length}),testStyles("#modernizr{display: table; direction: ltr}#modernizr div{display: table-cell; padding: 10px}",function(A){var e,t=A.childNodes;e=t[0].offsetLeft<t[1].offsetLeft,Modernizr.addTest("displaytable",e,{aliases:["display-table"]})},2),Modernizr.addTest("ellipsis",testAllProps("textOverflow","ellipsis"));var CSS=window.CSS;Modernizr.addTest("cssescape",CSS?"function"==typeof CSS.escape:!1),Modernizr.addTest("cssexunit",function(){var A,e=modElem.elem.style;try{e.fontSize="3ex",A=-1!==e.fontSize.indexOf("ex")}catch(t){A=!1}return A});var newSyntax="CSS"in window&&"supports"in window.CSS,oldSyntax="supportsCSS"in window;Modernizr.addTest("supports",newSyntax||oldSyntax),Modernizr.addTest("cssfilters",function(){if(Modernizr.supports)return testAllProps("filter","blur(2px)");var A=createElement("a");return A.style.cssText=prefixes.join("filter:blur(2px); "),!!A.style.length&&(document.documentMode===undefined||document.documentMode>9)}),Modernizr.addTest("flexbox",testAllProps("flexBasis","1px",!0)),Modernizr.addTest("flexboxlegacy",testAllProps("boxDirection","reverse",!0)),Modernizr.addTest("flexboxtweener",testAllProps("flexAlign","end",!0)),Modernizr.addTest("flexwrap",testAllProps("flexWrap","wrap",!0));var blacklist=function(){var A=navigator.userAgent,e=A.match(/applewebkit\/([0-9]+)/gi)&&parseFloat(RegExp.$1),t=A.match(/w(eb)?osbrowser/gi),r=A.match(/windows phone/gi)&&A.match(/iemobile\/([0-9])+/gi)&&parseFloat(RegExp.$1)>=9,n=533>e&&A.match(/android/gi);return t||n||r}();blacklist?Modernizr.addTest("fontface",!1):testStyles('@font-face {font-family:"font";src:url("https://")}',function(A,e){var t=document.getElementById("smodernizr"),r=t.sheet||t.styleSheet,n=r?r.cssRules&&r.cssRules[0]?r.cssRules[0].cssText:r.cssText||"":"",i=/src/i.test(n)&&0===n.indexOf(e.split(" ")[0]);Modernizr.addTest("fontface",i)}),testStyles('#modernizr{font:0/0 a}#modernizr:after{content:":)";visibility:hidden;font:7px/1 a}',function(A){Modernizr.addTest("generatedcontent",A.offsetHeight>=7)}),Modernizr.addTest("cssgradients",function(){for(var A,e="background-image:",t="gradient(linear,left top,right bottom,from(#9f9),to(white));",r="",n=0,i=prefixes.length-1;i>n;n++)A=0===n?"to ":"",r+=e+prefixes[n]+"linear-gradient("+A+"left top, #9f9, white);";Modernizr._config.usePrefixes&&(r+=e+"-webkit-"+t);var o=createElement("a"),d=o.style;return d.cssText=r,(""+d.backgroundImage).indexOf("gradient")>-1}),Modernizr.addTest("hsla",function(){var A=createElement("a").style;return A.cssText="background-color:hsla(120,40%,100%,.5)",contains(A.backgroundColor,"rgba")||contains(A.backgroundColor,"hsla")}),Modernizr.addAsyncTest(function(){function A(){function t(){try{var A=createElement("div"),e=createElement("span"),t=A.style,r=0,n=0,i=!1,o=document.body.firstElementChild||document.body.firstChild;return A.appendChild(e),e.innerHTML="Bacon ipsum dolor sit amet jerky velit in culpa hamburger et. Laborum dolor proident, enim dolore duis commodo et strip steak. Salami anim et, veniam consectetur dolore qui tenderloin jowl velit sirloin. Et ad culpa, fatback cillum jowl ball tip ham hock nulla short ribs pariatur aute. Pig pancetta ham bresaola, ut boudin nostrud commodo flank esse cow tongue culpa. Pork belly bresaola enim pig, ea consectetur nisi. Fugiat officia turkey, ea cow jowl pariatur ullamco proident do laborum velit sausage. Magna biltong sint tri-tip commodo sed bacon, esse proident aliquip. Ullamco ham sint fugiat, velit in enim sed mollit nulla cow ut adipisicing nostrud consectetur. Proident dolore beef ribs, laborum nostrud meatball ea laboris rump cupidatat labore culpa. Shankle minim beef, velit sint cupidatat fugiat tenderloin pig et ball tip. Ut cow fatback salami, bacon ball tip et in shank strip steak bresaola. In ut pork belly sed mollit tri-tip magna culpa veniam, short ribs qui in andouille ham consequat. Dolore bacon t-bone, velit short ribs enim strip steak nulla. Voluptate labore ut, biltong swine irure jerky. Cupidatat excepteur aliquip salami dolore. Ball tip strip steak in pork dolor. Ad in esse biltong. Dolore tenderloin exercitation ad pork loin t-bone, dolore in chicken ball tip qui pig. Ut culpa tongue, sint ribeye dolore ex shank voluptate hamburger. Jowl et tempor, boudin pork chop labore ham hock drumstick consectetur tri-tip elit swine meatball chicken ground round. Proident shankle mollit dolore. Shoulder ut duis t-bone quis reprehenderit. Meatloaf dolore minim strip steak, laboris ea aute bacon beef ribs elit shank in veniam drumstick qui. Ex laboris meatball cow tongue pork belly. Ea ball tip reprehenderit pig, sed fatback boudin dolore flank aliquip laboris eu quis. Beef ribs duis beef, cow corned beef adipisicing commodo nisi deserunt exercitation. Cillum dolor t-bone spare ribs, ham hock est sirloin. Brisket irure meatloaf in, boudin pork belly sirloin ball tip. Sirloin sint irure nisi nostrud aliqua. Nostrud nulla aute, enim officia culpa ham hock. Aliqua reprehenderit dolore sunt nostrud sausage, ea boudin pork loin ut t-bone ham tempor. Tri-tip et pancetta drumstick laborum. Ham hock magna do nostrud in proident. Ex ground round fatback, venison non ribeye in.",document.body.insertBefore(A,o),t.cssText="position:absolute;top:0;left:0;width:5em;text-align:justify;text-justification:newspaper;",r=e.offsetHeight,n=e.offsetWidth,t.cssText="position:absolute;top:0;left:0;width:5em;text-align:justify;text-justification:newspaper;"+prefixes.join("hyphens:auto; "),i=e.offsetHeight!=r||e.offsetWidth!=n,document.body.removeChild(A),A.removeChild(e),i}catch(d){return!1}}function r(A,e){try{var t=createElement("div"),r=createElement("span"),n=t.style,i=0,o=!1,d=!1,a=!1,s=document.body.firstElementChild||document.body.firstChild;return n.cssText="position:absolute;top:0;left:0;overflow:visible;width:1.25em;",t.appendChild(r),document.body.insertBefore(t,s),r.innerHTML="mm",i=r.offsetHeight,r.innerHTML="m"+A+"m",d=r.offsetHeight>i,e?(r.innerHTML="m<br />m",i=r.offsetWidth,r.innerHTML="m"+A+"m",a=r.offsetWidth>i):a=!0,d===!0&&a===!0&&(o=!0),document.body.removeChild(t),t.removeChild(r),o}catch(l){return!1}}function n(A){try{var e,t=createElement("input"),r=createElement("div"),n="lebowski",i=!1,o=document.body.firstElementChild||document.body.firstChild;r.innerHTML=n+A+n,document.body.insertBefore(r,o),document.body.insertBefore(t,r),t.setSelectionRange?(t.focus(),t.setSelectionRange(0,0)):t.createTextRange&&(e=t.createTextRange(),e.collapse(!0),e.moveEnd("character",0),e.moveStart("character",0),e.select());try{window.find?i=window.find(n+n):(e=window.self.document.body.createTextRange(),i=e.findText(n+n))}catch(d){i=!1}return document.body.removeChild(r),document.body.removeChild(t),i}catch(d){return!1}}return document.body||document.getElementsByTagName("body")[0]?(addTest("csshyphens",function(){if(!testAllProps("hyphens","auto",!0))return!1;try{return t()}catch(A){return!1}}),addTest("softhyphens",function(){try{return r("&#173;",!0)&&r("&#8203;",!1)}catch(A){return!1}}),void addTest("softhyphensfind",function(){try{return n("&#173;")&&n("&#8203;")}catch(A){return!1}})):void setTimeout(A,e)}var e=300;setTimeout(A,e)}),Modernizr.addTest("cssinvalid",function(){return testStyles("#modernizr input{height:0;border:0;padding:0;margin:0;width:10px} #modernizr input:invalid{width:50px}",function(A){var e=createElement("input");return e.required=!0,A.appendChild(e),e.clientWidth>10})}),testStyles("#modernizr div {width:100px} #modernizr :last-child{width:200px;display:block}",function(A){Modernizr.addTest("lastchild",A.lastChild.offsetWidth>A.firstChild.offsetWidth)},2),Modernizr.addTest("cssmask",testAllProps("maskRepeat","repeat-x",!0));var mq=function(){var A=window.matchMedia||window.msMatchMedia;return A?function(e){var t=A(e);return t&&t.matches||!1}:function(A){var e=!1;return injectElementWithStyles("@media "+A+" { #modernizr { position: absolute; } }",function(A){e="absolute"==(window.getComputedStyle?window.getComputedStyle(A,null):A.currentStyle).position}),e}}();ModernizrProto.mq=mq,Modernizr.addTest("mediaqueries",mq("only all")),Modernizr.addTest("multiplebgs",function(){var A=createElement("a").style;return A.cssText="background:url(https://),url(https://),red url(https://)",/(url\s*\(.*?){3}/.test(A.background)}),testStyles("#modernizr div {width:1px} #modernizr div:nth-child(2n) {width:2px;}",function(A){Modernizr.addTest("nthchild",function(){for(var e=A.getElementsByTagName("div"),t=!0,r=0;5>r;r++)t=t&&e[r].offsetWidth===r%2+1;return t})},5),Modernizr.addTest("objectfit",!!prefixed("objectFit"),{aliases:["object-fit"]}),Modernizr.addTest("opacity",function(){var A=createElement("a").style;return A.cssText=prefixes.join("opacity:.55;"),/^0.55$/.test(A.opacity)}),Modernizr.addTest("overflowscrolling",testAllProps("overflowScrolling","touch",!0)),Modernizr.addTest("csspointerevents",function(){var A=createElement("a").style;return A.cssText="pointer-events:auto","auto"===A.pointerEvents}),Modernizr.addTest("csspositionsticky",function(){var A="position:",e="sticky",t=createElement("a"),r=t.style;return r.cssText=A+prefixes.join(e+";"+A).slice(0,-A.length),-1!==r.position.indexOf(e)}),Modernizr.addTest("csspseudoanimations",function(){var A=!1;if(!Modernizr.cssanimations||!window.getComputedStyle)return A;var e=["@",Modernizr._prefixes.join("keyframes csspseudoanimations { from { font-size: 10px; } }@").replace(/\@$/,""),'#modernizr:before { content:" "; font-size:5px;',Modernizr._prefixes.join("animation:csspseudoanimations 1ms infinite;"),"}"].join("");return Modernizr.testStyles(e,function(e){A="10px"===window.getComputedStyle(e,":before").getPropertyValue("font-size")}),A}),Modernizr.addTest("csstransitions",testAllProps("transition","all",!0)),Modernizr.addTest("csspseudotransitions",function(){var A=!1;if(!Modernizr.csstransitions||!window.getComputedStyle)return A;var e='#modernizr:before { content:" "; font-size:5px;'+Modernizr._prefixes.join("transition:0s 100s;")+"}#modernizr.trigger:before { font-size:10px; }";return Modernizr.testStyles(e,function(e){window.getComputedStyle(e,":before").getPropertyValue("font-size"),e.className+="trigger",A="5px"===window.getComputedStyle(e,":before").getPropertyValue("font-size")}),A}),Modernizr.addTest("cssreflections",testAllProps("boxReflect","above",!0)),Modernizr.addTest("regions",function(){if(isSVG)return!1;var A=Modernizr.prefixed("flowFrom"),e=Modernizr.prefixed("flowInto"),t=!1;if(!A||!e)return t;var r=createElement("iframe"),n=createElement("div"),i=createElement("div"),o=createElement("div"),d="modernizr_flow_for_regions_check";i.innerText="M",n.style.cssText="top: 150px; left: 150px; padding: 0px;",o.style.cssText="width: 50px; height: 50px; padding: 42px;",o.style[A]=d,n.appendChild(i),n.appendChild(o),docElement.appendChild(n);var a,s,l=i.getBoundingClientRect();return i.style[e]=d,a=i.getBoundingClientRect(),s=parseInt(a.left-l.left,10),docElement.removeChild(n),42==s?t=!0:(docElement.appendChild(r),l=r.getBoundingClientRect(),r.style[e]=d,a=r.getBoundingClientRect(),l.height>0&&l.height!==a.height&&0===a.height&&(t=!0)),i=o=n=r=undefined,t}),Modernizr.addTest("cssremunit",function(){var A=createElement("a").style;try{A.fontSize="3rem"}catch(e){}return/rem/.test(A.fontSize)}),Modernizr.addTest("cssresize",testAllProps("resize","both",!0)),Modernizr.addTest("rgba",function(){var A=createElement("a").style;return A.cssText="background-color:rgba(150,255,150,.5)",(""+A.backgroundColor).indexOf("rgba")>-1}),testStyles("#modernizr{overflow: scroll; width: 40px; height: 40px; }#"+prefixes.join("scrollbar{width:0px} #modernizr::").split("#").slice(1).join("#")+"scrollbar{width:0px}",function(A){Modernizr.addTest("cssscrollbar",40==A.scrollWidth)}),Modernizr.addTest("shapes",testAllProps("shapeOutside","content-box",!0)),Modernizr.addTest("siblinggeneral",function(){return testStyles("#modernizr div {width:100px} #modernizr div ~ div {width:200px;display:block}",function(A){return 200==A.lastChild.offsetWidth},2)}),testStyles("#modernizr{position: absolute; top: -10em; visibility:hidden; font: normal 10px arial;}#subpixel{float: left; font-size: 33.3333%;}",function(A){var e=A.firstChild;e.innerHTML="This is a text written in Arial",Modernizr.addTest("subpixelfont",window.getComputedStyle?"44px"!==window.getComputedStyle(e,null).getPropertyValue("width"):!1)},1,["subpixel"]),Modernizr.addTest("target",function(){var A=window.document;if(!("querySelectorAll"in A))return!1;try{return A.querySelectorAll(":target"),!0}catch(e){return!1}}),Modernizr.addTest("textalignlast",testAllProps("textAlignLast"));var testProp=ModernizrProto.testProp=function(A,e,t){return testProps([A],undefined,e,t)};Modernizr.addTest("textshadow",testProp("textShadow","1px 1px")),Modernizr.addTest("csstransforms",function(){return-1===navigator.userAgent.indexOf("Android 2.")&&testAllProps("transform","scale(1)",!0)}),Modernizr.addTest("csstransforms3d",function(){var A=!!testAllProps("perspective","1px",!0),e=Modernizr._config.usePrefixes;if(A&&(!e||"webkitPerspective"in docElement.style)){var t,r="#modernizr{width:0;height:0}";Modernizr.supports?t="@supports (perspective: 1px)":(t="@media (transform-3d)",e&&(t+=",(-webkit-transform-3d)")),t+="{#modernizr{width:7px;height:18px;margin:0;padding:0;border:0}}",testStyles(r+t,function(e){A=7===e.offsetWidth&&18===e.offsetHeight})}return A}),Modernizr.addTest("preserve3d",testAllProps("transformStyle","preserve-3d")),Modernizr.addTest("userselect",testAllProps("userSelect","none",!0)),Modernizr.addTest("cssvalid",function(){return testStyles("#modernizr input{height:0;border:0;padding:0;margin:0;width:10px} #modernizr input:valid{width:50px}",function(A){var e=createElement("input");return A.appendChild(e),e.clientWidth>10})}),testStyles("#modernizr { height: 50vh; }",function(A){var e=parseInt(window.innerHeight/2,10),t=parseInt((window.getComputedStyle?getComputedStyle(A,null):A.currentStyle).height,10);Modernizr.addTest("cssvhunit",t==e)}),testStyles("#modernizr1{width: 50vmax}#modernizr2{width:50px;height:50px;overflow:scroll}#modernizr3{position:fixed;top:0;left:0;bottom:0;right:0}",function(A){var e=A.childNodes[2],t=A.childNodes[1],r=A.childNodes[0],n=parseInt((t.offsetWidth-t.clientWidth)/2,10),i=r.clientWidth/100,o=r.clientHeight/100,d=parseInt(50*Math.max(i,o),10),a=parseInt((window.getComputedStyle?getComputedStyle(e,null):e.currentStyle).width,10);Modernizr.addTest("cssvmaxunit",roundedEquals(d,a)||roundedEquals(d,a-n))},3),testStyles("#modernizr1{width: 50vm;width:50vmin}#modernizr2{width:50px;height:50px;overflow:scroll}#modernizr3{position:fixed;top:0;left:0;bottom:0;right:0}",function(A){var e=A.childNodes[2],t=A.childNodes[1],r=A.childNodes[0],n=parseInt((t.offsetWidth-t.clientWidth)/2,10),i=r.clientWidth/100,o=r.clientHeight/100,d=parseInt(50*Math.min(i,o),10),a=parseInt((window.getComputedStyle?getComputedStyle(e,null):e.currentStyle).width,10);Modernizr.addTest("cssvminunit",roundedEquals(d,a)||roundedEquals(d,a-n))},3),testStyles("#modernizr { width: 50vw; }",function(A){var e=parseInt(window.innerWidth/2,10),t=parseInt((window.getComputedStyle?getComputedStyle(A,null):A.currentStyle).width,10);Modernizr.addTest("cssvwunit",t==e)}),Modernizr.addTest("willchange","willChange"in docElement.style),Modernizr.addTest("wrapflow",function(){var A=prefixed("wrapFlow");if(!A||isSVG)return!1;var e=A.replace(/([A-Z])/g,function(A,e){return"-"+e.toLowerCase()}).replace(/^ms-/,"-ms-"),t=createElement("div"),r=createElement("div"),n=createElement("span");r.style.cssText="position: absolute; left: 50px; width: 100px; height: 20px;"+e+":end;",n.innerText="X",t.appendChild(r),t.appendChild(n),docElement.appendChild(t);var i=n.offsetLeft;return docElement.removeChild(t),r=n=t=undefined,150==i}),Modernizr.addTest("classlist","classList"in docElement),Modernizr.addTest("dataset",function(){var A=createElement("div");return A.setAttribute("data-a-b","c"),!(!A.dataset||"c"!==A.dataset.aB)}),Modernizr.addTest("documentfragment",function(){return"createDocumentFragment"in document&&"appendChild"in docElement}),Modernizr.addTest("microdata","getItems"in document),Modernizr.addTest("mutationobserver",!!window.MutationObserver||!!window.WebKitMutationObserver),Modernizr.addTest("bdi",function(){var A=createElement("div"),e=createElement("bdi");e.innerHTML="&#1573",A.appendChild(e),docElement.appendChild(A);var t="rtl"===(window.getComputedStyle?getComputedStyle(e,null):e.currentStyle).direction;return docElement.removeChild(A),t}),Modernizr.addTest("datalistelem",Modernizr.input.list),Modernizr.addTest("outputelem","value"in createElement("output")),Modernizr.addTest("picture","HTMLPictureElement"in window),Modernizr.addTest("progressbar",createElement("progress").max!==undefined),Modernizr.addTest("meter",createElement("meter").max!==undefined),Modernizr.addTest("template","content"in createElement("template")),Modernizr.addTest("time","valueAsDate"in createElement("time")),Modernizr.addTest("es5array",function(){return!!(Array.prototype&&Array.prototype.every&&Array.prototype.filter&&Array.prototype.forEach&&Array.prototype.indexOf&&Array.prototype.lastIndexOf&&Array.prototype.map&&Array.prototype.some&&Array.prototype.reduce&&Array.prototype.reduceRight&&Array.isArray)}),Modernizr.addTest("es5date",function(){var A="2013-04-12T06:06:37.307Z",e=!1;try{e=!!Date.parse(A)}catch(t){}return!!(Date.now&&Date.prototype&&Date.prototype.toISOString&&Date.prototype.toJSON&&e)}),Modernizr.addTest("es5function",function(){return!(!Function.prototype||!Function.prototype.bind)}),Modernizr.addTest("es5object",function(){return!!(Object.keys&&Object.create&&Object.getPrototypeOf&&Object.getOwnPropertyNames&&Object.isSealed&&Object.isFrozen&&Object.isExtensible&&Object.getOwnPropertyDescriptor&&Object.defineProperty&&Object.defineProperties&&Object.seal&&Object.freeze&&Object.preventExtensions)}),Modernizr.addTest("strictmode",function(){"use strict";return!this}()),Modernizr.addTest("es5string",function(){return!(!String.prototype||!String.prototype.trim)}),Modernizr.addTest("es5syntax",function(){var value,obj,stringAccess,getter,setter,reservedWords,zeroWidthChars;try{return stringAccess=eval('"foobar"[3] === "b"'),getter=eval("({ get x(){ return 1 } }).x === 1"),eval("({ set x(v){ value = v; } }).x = 1"),setter=1===value,eval("obj = ({ if: 1 })"),reservedWords=1===obj["if"],zeroWidthChars=eval("_‌‍ = true"),stringAccess&&getter&&setter&&reservedWords&&zeroWidthChars}catch(ignore){return!1}}),Modernizr.addTest("es5undefined",function(){var A,e;try{e=window.undefined,window.undefined=12345,A="undefined"==typeof window.undefined,window.undefined=e}catch(t){return!1}return A}),Modernizr.addTest("es5",function(){return!!(Modernizr.es5array&&Modernizr.es5date&&Modernizr.es5function&&Modernizr.es5object&&Modernizr.strictmode&&Modernizr.es5string&&Modernizr.json&&Modernizr.es5syntax&&Modernizr.es5undefined)}),Modernizr.addTest("es6array",!!(Array.prototype&&Array.prototype.copyWithin&&Array.prototype.fill&&Array.prototype.find&&Array.prototype.findIndex&&Array.prototype.keys&&Array.prototype.entries&&Array.prototype.values&&Array.from&&Array.of)),Modernizr.addTest("generators",function(){try{new Function("function* test() {}")()}catch(A){return!1}return!0}),Modernizr.addTest("es6math",!!(Math&&Math.clz32&&Math.cbrt&&Math.imul&&Math.sign&&Math.log10&&Math.log2&&Math.log1p&&Math.expm1&&Math.cosh&&Math.sinh&&Math.tanh&&Math.acosh&&Math.asinh&&Math.atanh&&Math.hypot&&Math.trunc&&Math.fround)),Modernizr.addTest("es6number",!!(Number.isFinite&&Number.isInteger&&Number.isSafeInteger&&Number.isNaN&&Number.parseInt&&Number.parseFloat&&Number.isInteger(Number.MAX_SAFE_INTEGER)&&Number.isInteger(Number.MIN_SAFE_INTEGER)&&Number.isFinite(Number.EPSILON))),Modernizr.addTest("es6object",!!(Object.assign&&Object.is&&Object.setPrototypeOf)),Modernizr.addTest("promises",function(){return"Promise"in window&&"resolve"in window.Promise&&"reject"in window.Promise&&"all"in window.Promise&&"race"in window.Promise&&function(){var A;return new window.Promise(function(e){A=e}),"function"==typeof A}()}),Modernizr.addTest("es6string",!!(String.fromCodePoint&&String.raw&&String.prototype.codePointAt&&String.prototype.repeat&&String.prototype.startsWith&&String.prototype.endsWith&&String.prototype.contains)),Modernizr.addTest("devicemotion","DeviceMotionEvent"in window),Modernizr.addTest("deviceorientation","DeviceOrientationEvent"in window),Modernizr.addTest("oninput",function(){var A,e=createElement("input");if(e.setAttribute("oninput","return"),hasEvent("oninput",docElement)||"function"==typeof e.oninput)return!0;try{var t=document.createEvent("KeyboardEvent");A=!1;var r=function(e){A=!0,e.preventDefault(),e.stopPropagation()};t.initKeyEvent("keypress",!0,!0,window,!1,!1,!1,!1,0,"e".charCodeAt(0)),docElement.appendChild(e),e.addEventListener("input",r,!1),e.focus(),e.dispatchEvent(t),e.removeEventListener("input",r,!1),docElement.removeChild(e)}catch(n){A=!1}return A}),Modernizr.addTest("filereader",!!(window.File&&window.FileList&&window.FileReader)),Modernizr.addTest("filesystem",!!prefixed("requestFileSystem",window)),Modernizr.addTest("capture","capture"in createElement("input")),Modernizr.addTest("fileinput",function(){if(navigator.userAgent.match(/(Android (1.0|1.1|1.5|1.6|2.0|2.1))|(Windows Phone (OS 7|8.0))|(XBLWP)|(ZuneWP)|(w(eb)?OSBrowser)|(webOS)|(Kindle\/(1.0|2.0|2.5|3.0))/))return!1;var A=createElement("input");return A.type="file",!A.disabled}),Modernizr.addTest("fileinputdirectory",function(){var A=createElement("input"),e="directory";if(A.type="file",e in A)return!0;for(var t=0,r=domPrefixes.length;r>t;t++)if(domPrefixes[t]+e in A)return!0;return!1}),Modernizr.addTest("formattribute",function(){var A,e=createElement("form"),t=createElement("input"),r=createElement("div"),n="formtest"+(new Date).getTime(),i=!1;e.id=n;try{t.setAttribute("form",n)}catch(o){document.createAttribute&&(A=document.createAttribute("form"),A.nodeValue=n,t.setAttributeNode(A))}return r.appendChild(e),r.appendChild(t),docElement.appendChild(r),i=e.elements&&1===e.elements.length&&t.form==e,r.parentNode.removeChild(r),i}),Modernizr.addTest("formvalidation",function(){var A=createElement("form");if(!("checkValidity"in A&&"addEventListener"in A))return!1;if("reportValidity"in A)return!0;var e,t=!1;return Modernizr.formvalidationapi=!0,A.addEventListener("submit",function(A){(!window.opera||window.operamini)&&A.preventDefault(),A.stopPropagation()},!1),A.innerHTML='<input name="modTest" required><button></button>',testStyles("#modernizr form{position:absolute;top:-99999em}",function(r){r.appendChild(A),e=A.getElementsByTagName("input")[0],e.addEventListener("invalid",function(A){t=!0,A.preventDefault(),A.stopPropagation()},!1),Modernizr.formvalidationmessage=!!e.validationMessage,A.getElementsByTagName("button")[0].click()}),t}),Modernizr.addTest("localizednumber",function(){if(!Modernizr.inputtypes.number)return!1;if(!Modernizr.formvalidation)return!1;var A,e=createElement("div"),t=getBody(),r=function(){return docElement.insertBefore(t,docElement.firstElementChild||docElement.firstChild)}();e.innerHTML='<input type="number" value="1.0" step="0.1"/>';var n=e.childNodes[0];r.appendChild(e),n.focus();try{document.execCommand("InsertText",!1,"1,1")}catch(i){}return A="number"===n.type&&1.1===n.valueAsNumber&&n.checkValidity(),r.removeChild(e),t.fake&&r.parentNode.removeChild(r),A}),Modernizr.addTest("sandbox","sandbox"in createElement("iframe")),Modernizr.addTest("seamless","seamless"in createElement("iframe")),Modernizr.addTest("srcdoc","srcdoc"in createElement("iframe")),Modernizr.addAsyncTest(function(){var A,e,t,r=createElement("img"),n="sizes"in r;!n&&"srcset"in r?(e="data:image/gif;base64,R0lGODlhAgABAPAAAP///wAAACH5BAAAAAAALAAAAAACAAEAAAICBAoAOw==",A="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==",t=function(){addTest("sizes",2==r.width)},r.onload=t,r.onerror=t,r.setAttribute("sizes","9px"),r.srcset=A+" 1w,"+e+" 8w",r.src=A):addTest("sizes",n)}),Modernizr.addTest("srcset","srcset"in createElement("img")),Modernizr.addAsyncTest(function(){var A=new Image;A.onerror=function(){addTest("webpalpha",!1,{aliases:["webp-alpha"]})},A.onload=function(){addTest("webpalpha",1==A.width,{aliases:["webp-alpha"]})},A.src="data:image/webp;base64,UklGRkoAAABXRUJQVlA4WAoAAAAQAAAAAAAAAAAAQUxQSAwAAAABBxAR/Q9ERP8DAABWUDggGAAAADABAJ0BKgEAAQADADQlpAADcAD++/1QAA=="}),Modernizr.addAsyncTest(function(){var A=new Image;A.onerror=function(){addTest("webpanimation",!1,{aliases:["webp-animation"]})},A.onload=function(){addTest("webpanimation",1==A.width,{aliases:["webp-animation"]})},A.src="data:image/webp;base64,UklGRlIAAABXRUJQVlA4WAoAAAASAAAAAAAAAAAAQU5JTQYAAAD/////AABBTk1GJgAAAAAAAAAAAAAAAAAAAGQAAABWUDhMDQAAAC8AAAAQBxAREYiI/gcA"}),Modernizr.addAsyncTest(function(){function A(A,e,t){function r(e){var r=e&&"load"===e.type?1==n.width:!1,i="webp"===A;addTest(A,i?new Boolean(r):r),t&&t(e)}var n=new Image;n.onerror=r,n.onload=r,n.src=e}var e=[{uri:"data:image/webp;base64,UklGRiQAAABXRUJQVlA4IBgAAAAwAQCdASoBAAEAAwA0JaQAA3AA/vuUAAA=",name:"webp"},{uri:"data:image/webp;base64,UklGRkoAAABXRUJQVlA4WAoAAAAQAAAAAAAAAAAAQUxQSAwAAAABBxAR/Q9ERP8DAABWUDggGAAAADABAJ0BKgEAAQADADQlpAADcAD++/1QAA==",name:"webp.alpha"},{uri:"data:image/webp;base64,UklGRlIAAABXRUJQVlA4WAoAAAASAAAAAAAAAAAAQU5JTQYAAAD/////AABBTk1GJgAAAAAAAAAAAAAAAAAAAGQAAABWUDhMDQAAAC8AAAAQBxAREYiI/gcA",name:"webp.animation"},{uri:"data:image/webp;base64,UklGRh4AAABXRUJQVlA4TBEAAAAvAAAAAAfQ//73v/+BiOh/AAA=",name:"webp.lossless"}],t=e.shift();A(t.name,t.uri,function(t){if(t&&"load"===t.type)for(var r=0;r<e.length;r++)A(e[r].name,e[r].uri)})}),Modernizr.addTest("inputformaction",!!("formAction"in createElement("input")),{aliases:["input-formaction"]}),Modernizr.addTest("inputformenctype",!!("formEnctype"in createElement("input")),{aliases:["input-formenctype"]}),Modernizr.addTest("inputformmethod",!!("formMethod"in createElement("input"))),Modernizr.addTest("inputformtarget",!!("formtarget"in createElement("input")),{aliases:["input-formtarget"]}),Modernizr.addTest("beacon","sendBeacon"in navigator),Modernizr.addTest("lowbandwidth",function(){var A=navigator.connection||{type:0};return 3==A.type||4==A.type||/^[23]g$/.test(A.type)}),Modernizr.addTest("eventsource","EventSource"in window),Modernizr.addTest("fetch","fetch"in window);var testXhrType=function(A){if("undefined"==typeof XMLHttpRequest)return!1;var e=new XMLHttpRequest;e.open("get","/",!0);try{e.responseType=A}catch(t){return!1}return"response"in e&&e.responseType==A};Modernizr.addTest("xhrresponsetypearraybuffer",testXhrType("arraybuffer")),Modernizr.addTest("xhrresponsetypeblob",testXhrType("blob")),Modernizr.addTest("xhrresponsetypedocument",testXhrType("document")),Modernizr.addTest("xhrresponsetypejson",testXhrType("json")),Modernizr.addTest("xhrresponsetypetext",testXhrType("text")),Modernizr.addTest("xhrresponsetype",function(){if("undefined"==typeof XMLHttpRequest)return!1;var A=new XMLHttpRequest;return A.open("get","/",!0),"response"in A}()),Modernizr.addTest("xhr2","XMLHttpRequest"in window&&"withCredentials"in new XMLHttpRequest),Modernizr.addTest("scriptasync","async"in createElement("script")),Modernizr.addTest("scriptdefer","defer"in createElement("script")),Modernizr.addTest("localstorage",function(){var A="modernizr";try{return localStorage.setItem(A,A),localStorage.removeItem(A),!0}catch(e){return!1}}),Modernizr.addTest("sessionstorage",function(){var A="modernizr";try{return sessionStorage.setItem(A,A),sessionStorage.removeItem(A),!0}catch(e){return!1}}),Modernizr.addTest("stylescoped","scoped"in createElement("style")),Modernizr.addTest("svgasimg",document.implementation.hasFeature("http://www.w3.org/TR/SVG11/feature#Image","1.1"));var toStringFn={}.toString;Modernizr.addTest("svgclippaths",function(){return!!document.createElementNS&&/SVGClipPath/.test(toStringFn.call(document.createElementNS("http://www.w3.org/2000/svg","clipPath")))}),Modernizr.addTest("svgfilters",function(){var A=!1;try{A="SVGFEColorMatrixElement"in window&&2==SVGFEColorMatrixElement.SVG_FECOLORMATRIX_TYPE_SATURATE}catch(e){}return A}),Modernizr.addTest("svgforeignobject",function(){return!!document.createElementNS&&/SVGForeignObject/.test(toStringFn.call(document.createElementNS("http://www.w3.org/2000/svg","foreignObject")))}),Modernizr.addTest("inlinesvg",function(){var A=createElement("div");return A.innerHTML="<svg/>","http://www.w3.org/2000/svg"==("undefined"!=typeof SVGRect&&A.firstChild&&A.firstChild.namespaceURI)}),Modernizr.addTest("textareamaxlength",!!("maxLength"in createElement("textarea")));var url=prefixed("URL",window,!1);url=url&&window[url],Modernizr.addTest("bloburls",url&&"revokeObjectURL"in url&&"createObjectURL"in url),Modernizr.addAsyncTest(function(){function A(){var A=new Image;A.onerror=function(){addTest("datauri",!0),Modernizr.datauri=new Boolean(!0),Modernizr.datauri.over32kb=!1},A.onload=function(){addTest("datauri",!0),Modernizr.datauri=new Boolean(!0),Modernizr.datauri.over32kb=1==A.width&&1==A.height};for(var e="R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";e.length<33e3;)e="\r\n"+e;
-A.src="data:image/gif;base64,"+e}-1!==navigator.userAgent.indexOf("MSIE 7.")&&setTimeout(function(){addTest("datauri",!1)},10);var e=new Image;e.onerror=function(){addTest("datauri",!1)},e.onload=function(){1==e.width&&1==e.height?A():addTest("datauri",!1)},e.src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="}),Modernizr.addAsyncTest(function(){function A(t){clearTimeout(e),r.removeEventListener("playing",A,!1),addTest("videoautoplay",t&&"playing"===t.type||0!==r.currentTime),r.parentNode.removeChild(r)}var e,t=300,r=createElement("video"),n=r.style;if(!(Modernizr.video&&"autoplay"in r))return void addTest("videoautoplay",!1);n.position="absolute",n.height=0,n.width=0;try{if(Modernizr.video.ogg)r.src="data:video/ogg;base64,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";else{if(!Modernizr.video.h264)return void addTest("videoautoplay",!1);r.src="data:video/mp4;base64,AAAAHGZ0eXBtcDQyAAAAAG1wNDJpc29tYXZjMQAAAz5tb292AAAAbG12aGQAAAAAzaNacc2jWnEAAV+QAAFfkAABAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAGGlvZHMAAAAAEICAgAcAT////3//AAACQ3RyYWsAAABcdGtoZAAAAAHNo1pxzaNacQAAAAEAAAAAAAFfkAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAEAAAABAAAAAAAd9tZGlhAAAAIG1kaGQAAAAAzaNacc2jWnEAAV+QAAFfkFXEAAAAAAAhaGRscgAAAAAAAAAAdmlkZQAAAAAAAAAAAAAAAAAAAAGWbWluZgAAABR2bWhkAAAAAQAAAAAAAAAAAAAAJGRpbmYAAAAcZHJlZgAAAAAAAAABAAAADHVybCAAAAABAAABVnN0YmwAAACpc3RzZAAAAAAAAAABAAAAmWF2YzEAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAEAAQAEgAAABIAAAAAAAAAAEOSlZUL0FWQyBDb2RpbmcAAAAAAAAAAAAAAAAAAAAAAAAY//8AAAAxYXZjQwH0AAr/4QAZZ/QACq609NQYBBkAAAMAAQAAAwAKjxImoAEABWjOAa8gAAAAEmNvbHJuY2xjAAYAAQAGAAAAGHN0dHMAAAAAAAAAAQAAAAUAAEZQAAAAKHN0c3oAAAAAAAAAAAAAAAUAAAIqAAAACAAAAAgAAAAIAAAACAAAAChzdHNjAAAAAAAAAAIAAAABAAAABAAAAAEAAAACAAAAAQAAAAEAAAAYc3RjbwAAAAAAAAACAAADYgAABaQAAAAUc3RzcwAAAAAAAAABAAAAAQAAABFzZHRwAAAAAAREREREAAAAb3VkdGEAAABnbWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAbWRpcgAAAAAAAAAAAAAAAAAAAAA6aWxzdAAAADKpdG9vAAAAKmRhdGEAAAABAAAAAEhhbmRCcmFrZSAwLjkuOCAyMDEyMDcxODAwAAACUm1kYXQAAAHkBgX/4NxF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxMjAgLSBILjI2NC9NUEVHLTQgQVZDIGNvZGVjIC0gQ29weWxlZnQgMjAwMy0yMDExIC0gaHR0cDovL3d3dy52aWRlb2xhbi5vcmcveDI2NC5odG1sIC0gb3B0aW9uczogY2FiYWM9MCByZWY9MSBkZWJsb2NrPTE6MDowIGFuYWx5c2U9MHgxOjAgbWU9ZXNhIHN1Ym1lPTkgcHN5PTAgbWl4ZWRfcmVmPTAgbWVfcmFuZ2U9NCBjaHJvbWFfbWU9MSB0cmVsbGlzPTAgOHg4ZGN0PTAgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0wIGNocm9tYV9xcF9vZmZzZXQ9MCB0aHJlYWRzPTYgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MCB3ZWlnaHRwPTAga2V5aW50PTUwIGtleWludF9taW49NSBzY2VuZWN1dD00MCBpbnRyYV9yZWZyZXNoPTAgcmM9Y3FwIG1idHJlZT0wIHFwPTAAgAAAAD5liISscR8A+E4ACAACFoAAITAAAgsAAPgYCoKgoC+L4vi+KAvi+L4YfAEAACMzgABF9AAEUGUgABDJiXnf4AAAAARBmiKUAAAABEGaQpQAAAAEQZpilAAAAARBmoKU"}}catch(i){return void addTest("videoautoplay",!1)}r.setAttribute("autoplay",""),r.style.cssText="display:none",docElement.appendChild(r),setTimeout(function(){r.addEventListener("playing",A,!1),e=setTimeout(A,t)},0)}),Modernizr.addAsyncTest(function(){if(Modernizr.webglextensions=new Boolean(!1),Modernizr.webgl){var A,e,t;try{A=createElement("canvas"),e=A.getContext("webgl")||A.getContext("experimental-webgl"),t=e.getSupportedExtensions()}catch(r){return}e!==undefined&&(Modernizr.webglextensions=new Boolean(!0));for(var n=-1,i=t.length;++n<i;)Modernizr.webglextensions[t[n]]=!0;A=undefined}}),Modernizr.addTest("getusermedia",!!prefixed("getUserMedia",navigator)),Modernizr.addTest("websocketsbinary",function(){var A,e="https:"==location.protocol?"wss":"ws";if("WebSocket"in window){if(A="binaryType"in WebSocket.prototype)return A;try{return!!new WebSocket(e+"://.").binaryType}catch(t){}}return!1}),Modernizr.addTest("matchmedia",!!prefixed("matchMedia",window)),Modernizr.addAsyncTest(function(){function A(){addTest("blobworkers",!1),e()}function e(){d&&r.revokeObjectURL(d),o&&o.terminate(),a&&clearTimeout(a)}try{var t=window.BlobBuilder,r=window.URL;Modernizr._config.usePrefix&&(t=t||window.MozBlobBuilder||window.WebKitBlobBuilder||window.MSBlobBuilder||window.OBlobBuilder,r=r||window.MozURL||window.webkitURL||window.MSURL||window.OURL);var n,i,o,d,a,s="Modernizr",l="this.onmessage=function(e){postMessage(e.data)}";try{n=new Blob([l],{type:"text/javascript"})}catch(c){}n||(i=new t,i.append(l),n=i.getBlob()),d=r.createObjectURL(n),o=new Worker(d),o.onmessage=function(A){addTest("blobworkers",s===A.data),e()},o.onerror=A,a=setTimeout(A,200),o.postMessage(s)}catch(c){A()}}),Modernizr.addAsyncTest(function(){try{var A="Modernizr",e=new Worker("data:text/javascript;base64,dGhpcy5vbm1lc3NhZ2U9ZnVuY3Rpb24oZSl7cG9zdE1lc3NhZ2UoZS5kYXRhKX0=");e.onmessage=function(t){e.terminate(),addTest("dataworkers",A===t.data),e=null},e.onerror=function(){addTest("dataworkers",!1),e=null},setTimeout(function(){addTest("dataworkers",!1)},200),e.postMessage(A)}catch(t){setTimeout(function(){addTest("dataworkers",!1)},0)}}),Modernizr.addTest("sharedworkers","SharedWorker"in window),Modernizr.addTest("blobconstructor",function(){try{return!!new Blob}catch(A){return!1}},{aliases:["blob-constructor"]}),Modernizr.addTest("webworkers","Worker"in window),Modernizr.addAsyncTest(function(){function A(){addTest("transferables",!1),e()}function e(){d&&URL.revokeObjectURL(d),a&&a.terminate(),n&&clearTimeout(n)}var t=!!(Modernizr.blobconstructor&&Modernizr.bloburls&&Modernizr.webworkers&&Modernizr.typedarrays);if(!t)return addTest("transferables",!1);try{var r,n,i='var hello = "world"',o=new Blob([i],{type:"text/javascript"}),d=URL.createObjectURL(o),a=new Worker(d);a.onerror=A,n=setTimeout(A,200),r=new ArrayBuffer(1),a.postMessage(r,[r]),addTest("transferables",0===r.byteLength),e()}catch(s){A()}}),testRunner(),setClasses(classes),delete ModernizrProto.addTest,delete ModernizrProto.addAsyncTest;for(var i=0;i<Modernizr._q.length;i++)Modernizr._q[i]();window.Modernizr=Modernizr}(window,document);
+A.src="data:image/gif;base64,"+e}-1!==navigator.userAgent.indexOf("MSIE 7.")&&setTimeout(function(){addTest("datauri",!1)},10);var e=new Image;e.onerror=function(){addTest("datauri",!1)},e.onload=function(){1==e.width&&1==e.height?A():addTest("datauri",!1)},e.src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="}),Modernizr.addAsyncTest(function(){function A(t){clearTimeout(e),r.removeEventListener("playing",A,!1),addTest("videoautoplay",t&&"playing"===t.type||0!==r.currentTime),r.parentNode.removeChild(r)}var e,t=300,r=createElement("video"),n=r.style;if(!(Modernizr.video&&"autoplay"in r))return void addTest("videoautoplay",!1);n.position="absolute",n.height=0,n.width=0;try{if(Modernizr.video.ogg)r.src="data:video/ogg;base64,T2dnUwACAAAAAAAAAABmnCATAAAAAHDEixYBKoB0aGVvcmEDAgEAAQABAAAQAAAQAAAAAAAFAAAAAQAAAAAAAAAAAGIAYE9nZ1MAAAAAAAAAAAAAZpwgEwEAAAACrA7TDlj///////////////+QgXRoZW9yYSsAAABYaXBoLk9yZyBsaWJ0aGVvcmEgMS4xIDIwMDkwODIyIChUaHVzbmVsZGEpAQAAABoAAABFTkNPREVSPWZmbXBlZzJ0aGVvcmEtMC4yOYJ0aGVvcmG+zSj3uc1rGLWpSUoQc5zmMYxSlKQhCDGMYhCEIQhAAAAAAAAAAAAAEW2uU2eSyPxWEvx4OVts5ir1aKtUKBMpJFoQ/nk5m41mUwl4slUpk4kkghkIfDwdjgajQYC8VioUCQRiIQh8PBwMhgLBQIg4FRba5TZ5LI/FYS/Hg5W2zmKvVoq1QoEykkWhD+eTmbjWZTCXiyVSmTiSSCGQh8PB2OBqNBgLxWKhQJBGIhCHw8HAyGAsFAiDgUCw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDAwPEhQUFQ0NDhESFRUUDg4PEhQVFRUOEBETFBUVFRARFBUVFRUVEhMUFRUVFRUUFRUVFRUVFRUVFRUVFRUVEAwLEBQZGxwNDQ4SFRwcGw4NEBQZHBwcDhATFhsdHRwRExkcHB4eHRQYGxwdHh4dGxwdHR4eHh4dHR0dHh4eHRALChAYKDM9DAwOExo6PDcODRAYKDlFOA4RFh0zV1A+EhYlOkRtZ00YIzdAUWhxXDFATldneXhlSFxfYnBkZ2MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEhIVGRoaGhoSFBYaGhoaGhUWGRoaGhoaGRoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhESFh8kJCQkEhQYIiQkJCQWGCEkJCQkJB8iJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQREhgvY2NjYxIVGkJjY2NjGBo4Y2NjY2MvQmNjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRISEhUXGBkbEhIVFxgZGxwSFRcYGRscHRUXGBkbHB0dFxgZGxwdHR0YGRscHR0dHhkbHB0dHR4eGxwdHR0eHh4REREUFxocIBERFBcaHCAiERQXGhwgIiUUFxocICIlJRcaHCAiJSUlGhwgIiUlJSkcICIlJSUpKiAiJSUlKSoqEBAQFBgcICgQEBQYHCAoMBAUGBwgKDBAFBgcICgwQEAYHCAoMEBAQBwgKDBAQEBgICgwQEBAYIAoMEBAQGCAgAfF5cdH1e3Ow/L66wGmYnfIUbwdUTe3LMRbqON8B+5RJEvcGxkvrVUjTMrsXYhAnIwe0dTJfOYbWrDYyqUrz7dw/JO4hpmV2LsQQvkUeGq1BsZLx+cu5iV0e0eScJ91VIQYrmqfdVSK7GgjOU0oPaPOu5IcDK1mNvnD+K8LwS87f8Jx2mHtHnUkTGAurWZlNQa74ZLSFH9oF6FPGxzLsjQO5Qe0edcpttd7BXBSqMCL4k/4tFrHIPuEQ7m1/uIWkbDMWVoDdOSuRQ9286kvVUlQjzOE6VrNguN4oRXYGkgcnih7t13/9kxvLYKQezwLTrO44sVmMPgMqORo1E0sm1/9SludkcWHwfJwTSybR4LeAz6ugWVgRaY8mV/9SluQmtHrzsBtRF/wPY+X0JuYTs+ltgrXAmlk10xQHmTu9VSIAk1+vcvU4ml2oNzrNhEtQ3CysNP8UeR35wqpKUBdGdZMSjX4WVi8nJpdpHnbhzEIdx7mwf6W1FKAiucMXrWUWVjyRf23chNtR9mIzDoT/6ZLYailAjhFlZuvPtSeZ+2oREubDoWmT3TguY+JHPdRVSLKxfKH3vgNqJ/9emeEYikGXDFNzaLjvTeGAL61mogOoeG3y6oU4rW55ydoj0lUTSR/mmRhPmF86uwIfzp3FtiufQCmppaHDlGE0r2iTzXIw3zBq5hvaTldjG4CPb9wdxAme0SyedVKczJ9AtYbgPOzYKJvZZImsN7ecrxWZg5dR6ZLj/j4qpWsIA+vYwE+Tca9ounMIsrXMB4Stiib2SPQtZv+FVIpfEbzv8ncZoLBXc3YBqTG1HsskTTotZOYTG+oVUjLk6zhP8bg4RhMUNtfZdO7FdpBuXzhJ5Fh8IKlJG7wtD9ik8rWOJxy6iQ3NwzBpQ219mlyv+FLicYs2iJGSE0u2txzed++D61ZWCiHD/cZdQVCqkO2gJpdpNaObhnDfAPrT89RxdWFZ5hO3MseBSIlANppdZNIV/Rwe5eLTDvkfWKzFnH+QJ7m9QWV1KdwnuIwTNtZdJMoXBf74OhRnh2t+OTGL+AVUnIkyYY+QG7g9itHXyF3OIygG2s2kud679ZWKqSFa9n3IHD6MeLv1lZ0XyduRhiDRtrNnKoyiFVLcBm0ba5Yy3fQkDh4XsFE34isVpOzpa9nR8iCpS4HoxG2rJpnRhf3YboVa1PcRouh5LIJv/uQcPNd095ickTaiGBnWLKVWRc0OnYTSyex/n2FofEPnDG8y3PztHrzOLK1xo6RAml2k9owKajOC0Wr4D5x+3nA0UEhK2m198wuBHF3zlWWVKWLN1CHzLClUfuoYBcx4b1llpeBKmbayaR58njtE9onD66lUcsg0Spm2snsb+8HaJRn4dYcLbCuBuYwziB8/5U1C1DOOz2gZjSZtrLJk6vrLF3hwY4Io9xuT/ruUFRSBkNtUzTOWhjh26irLEPx4jPZL3Fo3QrReoGTTM21xYTT9oFdhTUIvjqTkfkvt0bzgVUjq/hOYY8j60IaO/0AzRBtqkTS6R5ellZd5uKdzzhb8BFlDdAcrwkE0rbXTOPB+7Y0FlZO96qFL4Ykg21StJs8qIW7h16H5hGiv8V2Cflau7QVDepTAHa6Lgt6feiEvJDM21StJsmOH/hynURrKxvUpQ8BH0JF7BiyG2qZpnL/7AOU66gt+reLEXY8pVOCQvSsBtqZTNM8bk9ohRcwD18o/WVkbvrceVKRb9I59IEKysjBeTMmmbA21xu/6iHadLRxuIzkLpi8wZYmmbbWi32RVAUjruxWlJ//iFxE38FI9hNKOoCdhwf5fDe4xZ81lgREhK2m1j78vW1CqkuMu/AjBNK210kzRUX/B+69cMMUG5bYrIeZxVSEZISmkzbXOi9yxwIfPgdsov7R71xuJ7rFcACjG/9PzApqFq7wEgzNJm2suWESPuwrQvejj7cbnQxMkxpm21lUYJL0fKmogPPqywn7e3FvB/FCNxPJ85iVUkCE9/tLKx31G4CgNtWTTPFhMvlu8G4/TrgaZttTChljfNJGgOT2X6EqpETy2tYd9cCBI4lIXJ1/3uVUllZEJz4baqGF64yxaZ+zPLYwde8Uqn1oKANtUrSaTOPHkhvuQP3bBlEJ/LFe4pqQOHUI8T8q7AXx3fLVBgSCVpMba55YxN3rv8U1Dv51bAPSOLlZWebkL8vSMGI21lJmmeVxPRwFlZF1CpqCN8uLwymaZyjbXHCRytogPN3o/n74CNykfT+qqRv5AQlHcRxYrC5KvGmbbUwmZY/29BvF6C1/93x4WVglXDLFpmbapmF89HKTogRwqqSlGbu+oiAkcWFbklC6Zhf+NtTLFpn8oWz+HsNRVSgIxZWON+yVyJlE5tq/+GWLTMutYX9ekTySEQPLVNQQ3OfycwJBM0zNtZcse7CvcKI0V/zh16Dr9OSA21MpmmcrHC+6pTAPHPwoit3LHHqs7jhFNRD6W8+EBGoSEoaZttTCZljfduH/fFisn+dRBGAZYtMzbVMwvul/T/crK1NQh8gN0SRRa9cOux6clC0/mDLFpmbarmF8/e6CopeOLCNW6S/IUUg3jJIYiAcDoMcGeRbOvuTPjXR/tyo79LK3kqqkbxkkMRAOB0GODPItnX3Jnxro/25Ud+llbyVVSN4ySGIgHA6DHBnkWzr7kz410f7cqO/Syt5KqpFVJwn6gBEvBM0zNtZcpGOEPiysW8vvRd2R0f7gtjhqUvXL+gWVwHm4XJDBiMpmmZtrLfPwd/IugP5+fKVSysH1EXreFAcEhelGmbbUmZY4Xdo1vQWVnK19P4RuEnbf0gQnR+lDCZlivNM22t1ESmopPIgfT0duOfQrsjgG4tPxli0zJmF5trdL1JDUIUT1ZXSqQDeR4B8mX3TrRro/2McGeUvLtwo6jIEKMkCUXWsLyZROd9P/rFYNtXPBli0z398iVUlVKAjFlY437JXImUTm2r/4ZYtMy61hf16RPJIU9nZ1MABAwAAAAAAAAAZpwgEwIAAABhp658BScAAAAAAADnUFBQXIDGXLhwtttNHDhw5OcpQRMETBEwRPduylKVB0HRdF0A";else{if(!Modernizr.video.h264)return void addTest("videoautoplay",!1);r.src="data:video/mp4;base64,AAAAHGZ0eXBtcDQyAAAAAG1wNDJpc29tYXZjMQAAAz5tb292AAAAbG12aGQAAAAAzaNacc2jWnEAAV+QAAFfkAABAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAGGlvZHMAAAAAEICAgAcAT////3//AAACQ3RyYWsAAABcdGtoZAAAAAHNo1pxzaNacQAAAAEAAAAAAAFfkAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAEAAAABAAAAAAAd9tZGlhAAAAIG1kaGQAAAAAzaNacc2jWnEAAV+QAAFfkFXEAAAAAAAhaGRscgAAAAAAAAAAdmlkZQAAAAAAAAAAAAAAAAAAAAGWbWluZgAAABR2bWhkAAAAAQAAAAAAAAAAAAAAJGRpbmYAAAAcZHJlZgAAAAAAAAABAAAADHVybCAAAAABAAABVnN0YmwAAACpc3RzZAAAAAAAAAABAAAAmWF2YzEAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAEAAQAEgAAABIAAAAAAAAAAEOSlZUL0FWQyBDb2RpbmcAAAAAAAAAAAAAAAAAAAAAAAAY//8AAAAxYXZjQwH0AAr/4QAZZ/QACq609NQYBBkAAAMAAQAAAwAKjxImoAEABWjOAa8gAAAAEmNvbHJuY2xjAAYAAQAGAAAAGHN0dHMAAAAAAAAAAQAAAAUAAEZQAAAAKHN0c3oAAAAAAAAAAAAAAAUAAAIqAAAACAAAAAgAAAAIAAAACAAAAChzdHNjAAAAAAAAAAIAAAABAAAABAAAAAEAAAACAAAAAQAAAAEAAAAYc3RjbwAAAAAAAAACAAADYgAABaQAAAAUc3RzcwAAAAAAAAABAAAAAQAAABFzZHRwAAAAAAREREREAAAAb3VkdGEAAABnbWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAbWRpcgAAAAAAAAAAAAAAAAAAAAA6aWxzdAAAADKpdG9vAAAAKmRhdGEAAAABAAAAAEhhbmRCcmFrZSAwLjkuOCAyMDEyMDcxODAwAAACUm1kYXQAAAHkBgX/4NxF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxMjAgLSBILjI2NC9NUEVHLTQgQVZDIGNvZGVjIC0gQ29weWxlZnQgMjAwMy0yMDExIC0gaHR0cDovL3d3dy52aWRlb2xhbi5vcmcveDI2NC5odG1sIC0gb3B0aW9uczogY2FiYWM9MCByZWY9MSBkZWJsb2NrPTE6MDowIGFuYWx5c2U9MHgxOjAgbWU9ZXNhIHN1Ym1lPTkgcHN5PTAgbWl4ZWRfcmVmPTAgbWVfcmFuZ2U9NCBjaHJvbWFfbWU9MSB0cmVsbGlzPTAgOHg4ZGN0PTAgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0wIGNocm9tYV9xcF9vZmZzZXQ9MCB0aHJlYWRzPTYgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MCB3ZWlnaHRwPTAga2V5aW50PTUwIGtleWludF9taW49NSBzY2VuZWN1dD00MCBpbnRyYV9yZWZyZXNoPTAgcmM9Y3FwIG1idHJlZT0wIHFwPTAAgAAAAD5liISscR8A+E4ACAACFoAAITAAAgsAAPgYCoKgoC+L4vi+KAvi+L4YfAEAACMzgABF9AAEUGUgABDJiXnf4AAAAARBmiKUAAAABEGaQpQAAAAEQZpilAAAAARBmoKU"}}catch(i){return void addTest("videoautoplay",!1)}r.setAttribute("autoplay",""),r.style.cssText="display:none",docElement.appendChild(r),setTimeout(function(){r.addEventListener("playing",A,!1),e=setTimeout(A,t)},0)}),Modernizr.addAsyncTest(function(){if(Modernizr.webglextensions=new Boolean(!1),Modernizr.webgl){var A,e,t;try{A=createElement("canvas"),e=A.getContext("webgl")||A.getContext("experimental-webgl"),t=e.getSupportedExtensions()}catch(r){return}e!==undefined&&(Modernizr.webglextensions=new Boolean(!0));for(var n=-1,i=t.length;++n<i;)Modernizr.webglextensions[t[n]]=!0;A=undefined}}),Modernizr.addTest("getusermedia",!!prefixed("getUserMedia",navigator)),Modernizr.addTest("websocketsbinary",function(){var A,e="https:"==location.protocol?"wss":"ws";if("WebSocket"in window){if(A="binaryType"in WebSocket.prototype)return A;try{return!!new WebSocket(e+"://.").binaryType}catch(t){}}return!1}),Modernizr.addTest("matchmedia",!!prefixed("matchMedia",window)),Modernizr.addAsyncTest(function(){try{var A="Modernizr",e=new Worker("data:text/javascript;base64,dGhpcy5vbm1lc3NhZ2U9ZnVuY3Rpb24oZSl7cG9zdE1lc3NhZ2UoZS5kYXRhKX0=");e.onmessage=function(t){e.terminate(),addTest("dataworkers",A===t.data),e=null},e.onerror=function(){addTest("dataworkers",!1),e=null},setTimeout(function(){addTest("dataworkers",!1)},200),e.postMessage(A)}catch(t){setTimeout(function(){addTest("dataworkers",!1)},0)}}),Modernizr.addTest("sharedworkers","SharedWorker"in window),Modernizr.addTest("blobconstructor",function(){try{return!!new Blob}catch(A){return!1}},{aliases:["blob-constructor"]}),Modernizr.addTest("webworkers","Worker"in window),Modernizr.addAsyncTest(function(){function A(){addTest("transferables",!1),e()}function e(){d&&URL.revokeObjectURL(d),a&&a.terminate(),n&&clearTimeout(n)}var t=!!(Modernizr.blobconstructor&&Modernizr.bloburls&&Modernizr.webworkers&&Modernizr.typedarrays);if(!t)return addTest("transferables",!1);try{var r,n,i='var hello = "world"',o=new Blob([i],{type:"text/javascript"}),d=URL.createObjectURL(o),a=new Worker(d);a.onerror=A,n=setTimeout(A,200),r=new ArrayBuffer(1),a.postMessage(r,[r]),addTest("transferables",0===r.byteLength),e()}catch(s){A()}}),testRunner(),setClasses(classes),delete ModernizrProto.addTest,delete ModernizrProto.addAsyncTest;for(var i=0;i<Modernizr._q.length;i++)Modernizr._q[i]();window.Modernizr=Modernizr}(window,document);
 /*! highlight.js v9.0.0 | BSD3 License | git.io/hljslicense */
 (function(factory) {
 
