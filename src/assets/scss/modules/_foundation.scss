@@ -28,6 +28,7 @@
 // @import 'components/drilldown';
 @import 'components/dropdown-menu';
 @import 'components/dropdown';
+@import 'components/flex';
 @import 'components/flex-video';
 @import 'components/label';
 @import 'components/media-object';
@@ -53,6 +54,7 @@
 
   //Go with flex grid rather than float
   // @include foundation-grid;
+  @include foundation-flex-classes;
   @include foundation-flex-grid;
 
   @include foundation-typography;
