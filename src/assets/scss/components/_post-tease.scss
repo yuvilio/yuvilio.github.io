@@ -1,5 +1,26 @@
 //small previews
 
 .post-tease {
-  
+
+  >.row>.column {
+    background-color: #29506D;
+  }
+
+  .post-content {
+    border-radius: 50%;
+    border: 1px dashed #CAC382;
+    padding: 15px;
+    background-color: white;
+  }
+
+  header {
+      display: table;
+      color: white;
+
+  }
+
+  .excerpt {
+    padding: 40px;
+  }
+
 }

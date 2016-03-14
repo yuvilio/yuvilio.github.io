@@ -14,11 +14,13 @@ $env: '/* @echo env */';
 
 //components
 @import "components/global";
+@import "components/grid";
 @import "components/type";
 @import "components/svg";
 @import "components/spacing";
 
 @import "components/post-tease";
+@import "components/debug";
 
 @import "layouts/header";
 

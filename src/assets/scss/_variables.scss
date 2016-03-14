@@ -1,22 +1,22 @@
-
+//More global variables (see components for variables related to there)
 
 //colors
 $white       : #ffffff;
 $black       : #000000;
 
 //shorthand from palette
-$tuscany: $color-secondary-2-3;
-$tuscany-light: $color-secondary-2-1;
-$wheat: $color-secondary-1-2;
-$dark-wheat: $color-secondary-1-4;
-$wheat-light: $color-secondary-1-1;
-$medium-blue: $color-primary-3;
-$dark-blue: $color-primary-4;
-$crimson-red: $color-secondary-2-4;
+// $tuscany: $color-secondary-2-3;
+// $tuscany-light: $color-secondary-2-1;
+// $wheat: $color-secondary-1-2;
+// $dark-wheat: $color-secondary-1-4;
+// $wheat-light: $color-secondary-1-1;
+// $medium-blue: $color-primary-3;
+// $dark-blue: $color-primary-4;
+// $crimson-red: $color-secondary-2-4;
 
 
 //grays / desaturates
-$wheat-gray: desaturate( $wheat-light, 75% );
+// $wheat-gray: desaturate( $wheat-light, 75% );
 
 
 //font awesome
@@ -37,14 +37,14 @@ $section-spacing-mobile: 15px;
 
 //Foundation settings
 $body-bg: $white;
-$primary-color: $crimson-red; //links, ....
+// $primary-color: $crimson-red; //links, ....
 // $secondary-color: #e7e7e7;
-$body-font-color: darken($dark-wheat, 20%);
+// $body-font-color: darken($dark-wheat, 20%);
 
 //Top Bar
 $topbar-padding: 0;
 $topbar-background: inherit; //blend in with the background
-$topbar-link-color: $primary-color;
+// $topbar-link-color: $primary-color;
 
 // $topbar-input-width: 200px !default;
 
@@ -55,13 +55,10 @@ $grid-column-gutter: 30px;
 
 // d. Media Query Ranges
 // - - - - - - - - - - - - - - - - - - - - - - - - -
-
-$small-breakpoint:  em-calc(640);
-$medium-breakpoint: em-calc(1024);
-$large-breakpoint:  em-calc(1440);
-$xlarge-breakpoint: em-calc(1920);
-$small-range:   (0, $small-breakpoint);
-$medium-range:  ($small-breakpoint  + em-calc(1), $medium-breakpoint);
-$large-range:   ($medium-breakpoint + em-calc(1), $large-breakpoint);
-$xlarge-range:  ($large-breakpoint  + em-calc(1), $xlarge-breakpoint);
-$xxlarge-range: ($xlarge-breakpoint + em-calc(1), em-calc(99999999));
+$breakpoints: (
+  small: 0,
+  tablet: 600px,
+  medium: 1000px,
+  large: 1200px,
+);
+$breakpoint-classes:  (small tablet medium large); //accompanying utility classes
